@@ -1,0 +1,541 @@
+"""
+Camera Service - Thread-safe singleton for Sony A7R III control via gphoto2
+Simplified version with single lock and no keep-alive complexity
+"""
+
+import gphoto2 as gp
+import subprocess
+import time
+import logging
+import threading
+import atexit
+import signal
+from pathlib import Path
+from datetime import datetime
+from typing import Dict, Any, List, Optional, Generator
+from threading import Lock, Event
+
+from app.config import settings
+from app.services.event_bus import event_bus, EventType
+
+logger = logging.getLogger(__name__)
+
+
+class CameraService:
+    """Thread-safe singleton camera controller"""
+    
+    _instance = None
+    _initialized = False
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    
+    def __init__(self):
+        if self._initialized:
+            return
+        
+        self._camera = None
+        self._context = None
+        self._connected = False
+        self._model = None
+        
+        # Single lock for all camera operations
+        self._lock = Lock()
+        
+        # Live view control
+        self._stop_live_view = Event()
+        self._live_view_active = False
+        
+        self._initialized = True
+        
+        # Register cleanup on exit
+        atexit.register(self._cleanup_on_exit)
+        
+        logger.info("CameraService initialized")
+    
+    def _cleanup_on_exit(self):
+        """Ensure camera is released on process exit"""
+        logger.info("Cleaning up camera on exit...")
+        self._stop_live_view.set()
+        self._cleanup_camera()
+    
+    # =========== Process Management ===========
+    
+    def kill_ptp_processes(self) -> List[str]:
+        """Kill macOS PTP daemons that grab the camera USB"""
+        killed = []
+        for proc in settings.PTP_PROCESSES:
+            try:
+                result = subprocess.run(
+                    ["killall", "-9", proc],
+                    capture_output=True,
+                    timeout=5
+                )
+                if result.returncode == 0:
+                    killed.append(proc)
+            except Exception:
+                pass
+        
+        if killed:
+            time.sleep(0.3)
+        
+        return killed
+    
+    def reset_usb(self) -> bool:
+        """Reset USB device using gphoto2 --reset"""
+        try:
+            # First try gphoto2 reset
+            result = subprocess.run(
+                ["gphoto2", "--reset"],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            logger.info(f"USB reset via gphoto2: {result.returncode == 0}")
+            time.sleep(1)
+            return result.returncode == 0
+        except Exception as e:
+            logger.warning(f"USB reset failed: {e}")
+            return False
+    
+    def detect_camera(self) -> bool:
+        """Check if camera is detected via gphoto2 CLI"""
+        try:
+            result = subprocess.run(
+                ["gphoto2", "--auto-detect"],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            detected = "usb:" in result.stdout.lower()
+            logger.info(f"Camera detection: {'found' if detected else 'not found'}")
+            return detected
+        except Exception as e:
+            logger.error(f"Camera detection failed: {e}")
+            return False
+    
+    def startup_check(self):
+        """Run at startup to log camera status"""
+        self.kill_ptp_processes()
+        detected = self.detect_camera()
+        if detected:
+            logger.info("✓ Camera detected at startup")
+        else:
+            logger.warning("✗ No camera detected at startup")
+    
+    # =========== Connection ===========
+    
+    @property
+    def is_connected(self) -> bool:
+        return self._connected and self._camera is not None
+    
+    @property
+    def model(self) -> Optional[str]:
+        return self._model
+    
+    def connect(self) -> Dict[str, Any]:
+        """Connect to camera"""
+        with self._lock:
+            if self._connected:
+                return {
+                    "success": True,
+                    "connected": True,
+                    "model": self._model,
+                    "message": "Already connected"
+                }
+            
+            # Kill PTP grabbers first
+            self.kill_ptp_processes()
+            time.sleep(0.5)
+            
+            # Try to connect with retries
+            max_retries = 3
+            last_error = None
+            
+            for attempt in range(max_retries):
+                try:
+                    logger.info(f"Connection attempt {attempt + 1}/{max_retries}")
+                    
+                    self._context = gp.Context()
+                    self._camera = gp.Camera()
+                    self._camera.init(self._context)
+                    
+                    # Get camera model
+                    abilities = self._camera.get_abilities()
+                    self._model = abilities.model
+                    self._connected = True
+                    
+                    # Set manual focus to prevent AF blocking shutter
+                    self._set_manual_focus()
+                    
+                    logger.info(f"✓ Connected to {self._model}")
+                    event_bus.publish(EventType.CAMERA_CONNECTED, {"model": self._model})
+                    
+                    return {
+                        "success": True,
+                        "connected": True,
+                        "model": self._model,
+                        "message": f"Connected to {self._model}"
+                    }
+                    
+                except gp.GPhoto2Error as e:
+                    last_error = e
+                    logger.warning(f"Attempt {attempt + 1} failed: {e}")
+                    self._cleanup_camera()
+                    if attempt < max_retries - 1:
+                        self.kill_ptp_processes()
+                        time.sleep(1)
+            
+            error_msg = f"Failed to connect after {max_retries} attempts: {last_error}"
+            logger.error(error_msg)
+            return {
+                "success": False,
+                "connected": False,
+                "model": None,
+                "message": error_msg
+            }
+    
+    def disconnect(self) -> Dict[str, Any]:
+        """Disconnect from camera"""
+        with self._lock:
+            self._stop_live_view.set()
+            self._cleanup_camera()
+            event_bus.publish(EventType.CAMERA_DISCONNECTED, {})
+            
+            return {
+                "success": True,
+                "connected": False,
+                "message": "Disconnected"
+            }
+    
+    def _cleanup_camera(self):
+        """Internal cleanup of camera resources"""
+        if self._camera:
+            try:
+                self._camera.exit(self._context)
+            except Exception:
+                pass
+        self._camera = None
+        self._context = None
+        self._connected = False
+        self._model = None
+    
+    def _set_manual_focus(self):
+        """Set camera to manual focus to prevent AF blocking shutter"""
+        try:
+            config = self._camera.get_config(self._context)
+            focus_widget = config.get_child_by_name("focusmode")
+            focus_widget.set_value("Manual")
+            self._camera.set_config(config, self._context)
+            logger.info("Set focus mode to Manual")
+        except Exception as e:
+            logger.debug(f"Could not set manual focus: {e}")
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get camera status without locking"""
+        detected = self.detect_camera()
+        return {
+            "connected": self._connected,
+            "detected": detected,
+            "model": self._model,
+            "live_view_active": self._live_view_active
+        }
+    
+    def troubleshoot(self) -> Dict[str, Any]:
+        """Kill PTP processes, reset USB, and detect camera"""
+        with self._lock:
+            self._stop_live_view.set()
+            self._cleanup_camera()
+            
+            # Kill processes
+            killed = self.kill_ptp_processes()
+            time.sleep(0.3)
+            
+            # Reset USB device
+            usb_reset = self.reset_usb()
+            time.sleep(0.5)
+            
+            # Kill again after reset (daemons may respawn)
+            killed2 = self.kill_ptp_processes()
+            killed.extend(killed2)
+            time.sleep(0.3)
+            
+            detected = self.detect_camera()
+            
+            return {
+                "success": True,
+                "killed_processes": killed,
+                "usb_reset": usb_reset,
+                "camera_detected": detected,
+                "message": f"Killed {len(killed)} processes. USB reset: {usb_reset}. Camera {'detected' if detected else 'not detected'}."
+            }
+    
+    # =========== Settings ===========
+    
+    def get_settings(self) -> List[Dict[str, Any]]:
+        """Get camera settings"""
+        # Don't try to get settings while live view is active (would block)
+        if self._live_view_active:
+            return []
+        
+        # Try to acquire lock without blocking too long
+        acquired = self._lock.acquire(timeout=2)
+        if not acquired:
+            return []
+        
+        try:
+            if not self.is_connected:
+                return []
+            
+            try:
+                config = self._camera.get_config(self._context)
+                return self._parse_config(config)
+            except gp.GPhoto2Error as e:
+                logger.warning(f"Failed to get settings: {e}")
+                return []
+        finally:
+            self._lock.release()
+    
+    def set_setting(self, name: str, value: Any) -> Dict[str, Any]:
+        """Set a camera setting"""
+        with self._lock:
+            if not self.is_connected:
+                raise Exception("Camera not connected")
+            
+            try:
+                config = self._camera.get_config(self._context)
+                widget = config.get_child_by_name(name)
+                
+                # Type conversion based on widget type
+                widget_type = widget.get_type()
+                if widget_type == gp.GP_WIDGET_TOGGLE:
+                    value = int(bool(value))
+                elif widget_type == gp.GP_WIDGET_RANGE:
+                    value = float(value)
+                
+                widget.set_value(value)
+                self._camera.set_config(config, self._context)
+                
+                logger.info(f"Set {name} = {value}")
+                event_bus.publish(EventType.SETTING_CHANGED, {"name": name, "value": value})
+                
+                return {"success": True, "name": name, "value": value}
+                
+            except gp.GPhoto2Error as e:
+                raise Exception(f"Failed to set {name}: {e}")
+    
+    def _parse_config(self, widget, depth=0) -> List[Dict[str, Any]]:
+        """Parse gphoto2 config widget tree"""
+        results = []
+        
+        widget_type = widget.get_type()
+        
+        # Only include leaf nodes with values
+        if widget_type in (gp.GP_WIDGET_TEXT, gp.GP_WIDGET_RADIO,
+                           gp.GP_WIDGET_MENU, gp.GP_WIDGET_TOGGLE,
+                           gp.GP_WIDGET_RANGE):
+            item = {
+                "name": widget.get_name(),
+                "label": widget.get_label(),
+                "type": self._widget_type_name(widget_type),
+                "readonly": bool(widget.get_readonly()),
+            }
+            
+            try:
+                item["value"] = widget.get_value()
+            except:
+                item["value"] = None
+            
+            if widget_type in (gp.GP_WIDGET_RADIO, gp.GP_WIDGET_MENU):
+                try:
+                    item["choices"] = [widget.get_choice(i) for i in range(widget.count_choices())]
+                except:
+                    item["choices"] = []
+            
+            if widget_type == gp.GP_WIDGET_RANGE:
+                try:
+                    item["range"] = widget.get_range()
+                except:
+                    item["range"] = None
+            
+            results.append(item)
+        
+        # Recurse children
+        for i in range(widget.count_children()):
+            child = widget.get_child(i)
+            results.extend(self._parse_config(child, depth + 1))
+        
+        return results
+    
+    def _widget_type_name(self, widget_type: int) -> str:
+        """Convert widget type to string"""
+        type_map = {
+            gp.GP_WIDGET_TEXT: "text",
+            gp.GP_WIDGET_RADIO: "radio",
+            gp.GP_WIDGET_MENU: "menu",
+            gp.GP_WIDGET_TOGGLE: "toggle",
+            gp.GP_WIDGET_RANGE: "range",
+        }
+        return type_map.get(widget_type, "unknown")
+    
+    # =========== Capture ===========
+    
+    def capture_image(self, folder: str, prefix: str = "capture") -> Dict[str, Any]:
+        """Capture a single image and save to folder"""
+        # Stop live view first (outside lock to avoid deadlock)
+        if self._live_view_active:
+            self._stop_live_view.set()
+            # Wait for live view to stop
+            for _ in range(20):
+                if not self._live_view_active:
+                    break
+                time.sleep(0.1)
+            time.sleep(0.2)  # Extra settle time
+        
+        with self._lock:
+            # Create folder
+            folder_path = settings.CAPTURES_DIR / folder
+            folder_path.mkdir(parents=True, exist_ok=True)
+            
+            # Generate filename with milliseconds
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+            
+            # Retry capture up to 2 times
+            max_retries = 2
+            last_error = None
+            
+            for attempt in range(max_retries):
+                # Ensure connection before each attempt
+                if not self._connected or not self._camera:
+                    self.kill_ptp_processes()
+                    time.sleep(0.3)
+                    try:
+                        self._context = gp.Context()
+                        self._camera = gp.Camera()
+                        self._camera.init(self._context)
+                        abilities = self._camera.get_abilities()
+                        self._model = abilities.model
+                        self._connected = True
+                        logger.info(f"Reconnected for capture attempt {attempt + 1}")
+                    except gp.GPhoto2Error as e:
+                        last_error = e
+                        logger.warning(f"Reconnect failed on attempt {attempt + 1}: {e}")
+                        continue
+                
+                try:
+                    # Capture
+                    file_path = self._camera.capture(gp.GP_CAPTURE_IMAGE)
+                    logger.info(f"Captured: {file_path.folder}/{file_path.name}")
+                    
+                    # Download
+                    camera_file = self._camera.file_get(
+                        file_path.folder,
+                        file_path.name,
+                        gp.GP_FILE_TYPE_NORMAL
+                    )
+                    
+                    # Determine extension
+                    ext = Path(file_path.name).suffix or ".ARW"
+                    local_filename = f"{prefix}_{timestamp}{ext}"
+                    local_path = folder_path / local_filename
+                    
+                    # Save
+                    camera_file.save(str(local_path))
+                    file_size = local_path.stat().st_size
+                    logger.info(f"Saved: {local_path} ({file_size} bytes)")
+                    
+                    # Delete from camera
+                    try:
+                        self._camera.file_delete(file_path.folder, file_path.name)
+                        logger.info(f"Deleted from camera: {file_path.name}")
+                    except Exception as del_err:
+                        logger.warning(f"Could not delete from camera: {del_err}")
+                    
+                    event_bus.publish(EventType.CAPTURE_COMPLETE, {
+                        "filename": local_filename,
+                        "folder": folder,
+                        "size": file_size
+                    })
+                    
+                    return {
+                        "success": True,
+                        "filename": local_filename,
+                        "filepath": str(local_path),
+                        "file_url": f"/media/captures/{folder}/{local_filename}",
+                        "file_size": file_size,
+                        "captured_at": datetime.now().isoformat()
+                    }
+                
+                except gp.GPhoto2Error as e:
+                    last_error = e
+                    logger.warning(f"Capture attempt {attempt + 1} failed: {e}")
+                    self._cleanup_camera()
+                    if attempt < max_retries - 1:
+                        time.sleep(0.5)
+            
+            error_msg = f"Capture failed after {max_retries} attempts: {last_error}"
+            logger.error(error_msg)
+            return {"success": False, "error": error_msg}
+    
+    # =========== Live View ===========
+    
+    def start_live_view(self) -> Generator[bytes, None, None]:
+        """Start MJPEG live view stream"""
+        # Stop any existing live view
+        if self._live_view_active:
+            self._stop_live_view.set()
+            time.sleep(0.2)
+        
+        # Acquire lock just for setup
+        with self._lock:
+            if not self._connected or not self._camera:
+                # Connect if needed
+                self.kill_ptp_processes()
+                time.sleep(0.3)
+                try:
+                    self._context = gp.Context()
+                    self._camera = gp.Camera()
+                    self._camera.init(self._context)
+                    abilities = self._camera.get_abilities()
+                    self._model = abilities.model
+                    self._connected = True
+                except Exception as e:
+                    raise Exception(f"Failed to connect for live view: {e}")
+            
+            self._stop_live_view.clear()
+            self._live_view_active = True
+        
+        # Generate frames (outside lock for performance)
+        try:
+            while not self._stop_live_view.is_set():
+                try:
+                    # Quick lock just for camera access
+                    with self._lock:
+                        if not self._camera or self._stop_live_view.is_set():
+                            break
+                        camera_file = self._camera.capture_preview()
+                        data = bytes(camera_file.get_data_and_size())
+                    
+                    yield data
+                    time.sleep(1.0 / settings.PREVIEW_FPS)
+                    
+                except gp.GPhoto2Error as e:
+                    logger.error(f"Live view error: {e}")
+                    break
+                except Exception as e:
+                    logger.error(f"Live view error: {e}")
+                    break
+        finally:
+            self._live_view_active = False
+            logger.info("Live view ended")
+    
+    def stop_live_view(self):
+        """Stop live view stream"""
+        self._stop_live_view.set()
+        self._live_view_active = False
+
+
+# Global singleton instance
+camera_service = CameraService()
