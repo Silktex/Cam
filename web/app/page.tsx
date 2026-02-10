@@ -5,7 +5,7 @@ import { CameraControl } from '@/components/camera-control';
 import { CapturePanel } from '@/components/capture-panel';
 import { StreamViewer } from '@/components/stream-viewer';
 import { CameraSettings } from '@/components/camera-settings';
-import { Camera, Images } from 'lucide-react';
+import { Camera, Images, Lightbulb, Layers } from 'lucide-react';
 import Link from 'next/link';
 
 export default function Home() {
@@ -26,13 +26,29 @@ export default function Home() {
                 </p>
               </div>
             </div>
-            <Link
-              href="/gallery"
-              className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
-            >
-              <Images className="w-5 h-5" />
-              <span>Gallery</span>
-            </Link>
+            <div className="flex items-center gap-3">
+              <Link
+                href="/batch"
+                className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors"
+              >
+                <Layers className="w-5 h-5" />
+                <span>Batch</span>
+              </Link>
+              <Link
+                href="/lights"
+                className="flex items-center gap-2 px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors"
+              >
+                <Lightbulb className="w-5 h-5" />
+                <span>Lights</span>
+              </Link>
+              <Link
+                href="/gallery"
+                className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+              >
+                <Images className="w-5 h-5" />
+                <span>Gallery</span>
+              </Link>
+            </div>
           </div>
         </div>
       </header>

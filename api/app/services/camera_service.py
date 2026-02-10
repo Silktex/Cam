@@ -388,11 +388,11 @@ class CameraService:
         if self._live_view_active:
             self._stop_live_view.set()
             # Wait for live view to stop
-            for _ in range(20):
+            for _ in range(30):  # Wait up to 3 seconds
                 if not self._live_view_active:
                     break
                 time.sleep(0.1)
-            time.sleep(0.2)  # Extra settle time
+            time.sleep(0.5)  # Extra settle time after live view stops
         
         with self._lock:
             # Create folder
@@ -402,15 +402,15 @@ class CameraService:
             # Generate filename with milliseconds
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
             
-            # Retry capture up to 2 times
-            max_retries = 2
+            # Retry capture up to 3 times
+            max_retries = 3
             last_error = None
             
             for attempt in range(max_retries):
                 # Ensure connection before each attempt
                 if not self._connected or not self._camera:
                     self.kill_ptp_processes()
-                    time.sleep(0.3)
+                    time.sleep(0.5)
                     try:
                         self._context = gp.Context()
                         self._camera = gp.Camera()
@@ -418,16 +418,25 @@ class CameraService:
                         abilities = self._camera.get_abilities()
                         self._model = abilities.model
                         self._connected = True
+                        self._set_manual_focus()
                         logger.info(f"Reconnected for capture attempt {attempt + 1}")
+                        time.sleep(0.3)  # Let camera stabilize after reconnect
                     except gp.GPhoto2Error as e:
                         last_error = e
                         logger.warning(f"Reconnect failed on attempt {attempt + 1}: {e}")
+                        time.sleep(1)  # Wait before next reconnect attempt
                         continue
                 
                 try:
+                    # Drain any pending camera events before capture
+                    self._drain_camera_events()
+                    
                     # Capture
                     file_path = self._camera.capture(gp.GP_CAPTURE_IMAGE)
                     logger.info(f"Captured: {file_path.folder}/{file_path.name}")
+                    
+                    # Wait for camera to finish writing (important for RAW files)
+                    self._wait_for_camera_ready()
                     
                     # Download
                     camera_file = self._camera.file_get(
@@ -453,6 +462,10 @@ class CameraService:
                     except Exception as del_err:
                         logger.warning(f"Could not delete from camera: {del_err}")
                     
+                    # Wait for camera to be ready for next operation
+                    time.sleep(0.5)
+                    self._drain_camera_events()
+                    
                     event_bus.publish(EventType.CAPTURE_COMPLETE, {
                         "filename": local_filename,
                         "folder": folder,
@@ -473,11 +486,48 @@ class CameraService:
                     logger.warning(f"Capture attempt {attempt + 1} failed: {e}")
                     self._cleanup_camera()
                     if attempt < max_retries - 1:
-                        time.sleep(0.5)
+                        time.sleep(1.5)  # Wait longer before retry
             
             error_msg = f"Capture failed after {max_retries} attempts: {last_error}"
             logger.error(error_msg)
             return {"success": False, "error": error_msg}
+    
+    def _drain_camera_events(self, timeout_ms: int = 100):
+        """Drain any pending camera events to clear the buffer"""
+        if not self._camera or not self._context:
+            return
+        try:
+            while True:
+                event_type, event_data = self._camera.wait_for_event(timeout_ms)
+                if event_type == gp.GP_EVENT_TIMEOUT:
+                    break
+                logger.debug(f"Drained event: {event_type}")
+        except Exception as e:
+            logger.debug(f"Event drain error (ok): {e}")
+    
+    def _wait_for_camera_ready(self, max_wait: float = 5.0):
+        """Wait for camera to finish processing (e.g., after RAW capture)"""
+        if not self._camera or not self._context:
+            return
+        
+        start_time = time.time()
+        while time.time() - start_time < max_wait:
+            try:
+                event_type, event_data = self._camera.wait_for_event(500)
+                if event_type == gp.GP_EVENT_TIMEOUT:
+                    # No more events, camera is idle
+                    break
+                elif event_type == gp.GP_EVENT_FILE_ADDED:
+                    logger.debug(f"File added event: {event_data}")
+                elif event_type == gp.GP_EVENT_CAPTURE_COMPLETE:
+                    logger.debug("Capture complete event received")
+                    break
+            except Exception as e:
+                logger.debug(f"Wait for ready error: {e}")
+                break
+        
+        # Small extra delay for camera to fully stabilize
+        time.sleep(0.2)
     
     # =========== Live View ===========
     

@@ -11,8 +11,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
-from app.routers import health, camera, capture, liveview, websocket
+from app.routers import health, camera, capture, liveview, websocket, lights, lights_ws, batch_capture
 from app.services.camera_service import camera_service
+from app.services.light_service import light_service
 
 # Configure logging
 logging.basicConfig(
@@ -33,12 +34,24 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Startup camera check failed: {e}")
     
+    # Startup: Connect to ESP32 light controller
+    try:
+        await light_service.connect()
+    except Exception as e:
+        logger.warning(f"ESP32 light controller connection failed: {e}")
+    
     yield
     
     # Shutdown: Disconnect camera
     logger.info("Shutting down Camera Control API...")
     try:
         camera_service.disconnect()
+    except Exception:
+        pass
+    
+    # Shutdown: Disconnect light controller
+    try:
+        await light_service.disconnect()
     except Exception:
         pass
 
@@ -68,6 +81,9 @@ app.include_router(camera.router, prefix="/api/camera", tags=["Camera"])
 app.include_router(capture.router, prefix="/api/capture", tags=["Capture"])
 app.include_router(liveview.router, prefix="/api/liveview", tags=["Live View"])
 app.include_router(websocket.router, prefix="/api/ws", tags=["WebSocket"])
+app.include_router(lights.router, prefix="/api/lights", tags=["Lights"])
+app.include_router(lights_ws.router, prefix="/ws", tags=["Lights WebSocket"])
+app.include_router(batch_capture.router, prefix="/api/batch", tags=["Batch Capture"])
 
 
 @app.get("/")
