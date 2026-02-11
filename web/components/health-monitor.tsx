@@ -19,12 +19,12 @@ export function HealthMonitor() {
 
   if (isLoading) {
     return (
-      <div className="bg-white rounded-lg shadow p-4">
+      <div className="bg-white border border-slate-200 rounded-2xl p-4">
         <div className="animate-pulse flex items-center gap-3">
-          <div className="w-12 h-12 bg-gray-200 rounded-full" />
+          <div className="w-12 h-12 bg-slate-100 rounded-xl" />
           <div className="flex-1">
-            <div className="h-4 bg-gray-200 rounded w-24 mb-2" />
-            <div className="h-3 bg-gray-200 rounded w-32" />
+            <div className="h-4 bg-slate-100 rounded w-24 mb-2" />
+            <div className="h-3 bg-slate-100 rounded w-32" />
           </div>
         </div>
       </div>
@@ -33,9 +33,9 @@ export function HealthMonitor() {
 
   if (error) {
     return (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+      <div className="bg-red-50 border border-red-200 rounded-2xl p-4">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
+          <div className="w-12 h-12 bg-red-100 rounded-xl flex items-center justify-center">
             <XCircle className="w-6 h-6 text-red-500" />
           </div>
           <div>
@@ -52,12 +52,12 @@ export function HealthMonitor() {
   const model = data?.model;
 
   // Determine status
-  let statusColor = 'gray';
+  let statusColor = 'slate';
   let statusText = 'No Camera';
   let StatusIcon = XCircle;
 
   if (isConnected) {
-    statusColor = 'green';
+    statusColor = 'teal';
     statusText = 'Connected';
     StatusIcon = CheckCircle;
   } else if (isDetected) {
@@ -67,24 +67,24 @@ export function HealthMonitor() {
   }
 
   return (
-    <div className="bg-white rounded-lg shadow p-4">
+    <div className="bg-white border border-slate-200 rounded-2xl p-4">
       <div className="flex items-center gap-3">
-        <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
-          statusColor === 'green' ? 'bg-green-100' : statusColor === 'yellow' ? 'bg-yellow-100' : 'bg-gray-100'
+        <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${
+          statusColor === 'teal' ? 'bg-teal-100' : statusColor === 'yellow' ? 'bg-yellow-100' : 'bg-slate-100'
         }`}>
           <Camera className={`w-6 h-6 ${
-            statusColor === 'green' ? 'text-green-600' : statusColor === 'yellow' ? 'text-yellow-600' : 'text-gray-600'
+            statusColor === 'teal' ? 'text-teal-600' : statusColor === 'yellow' ? 'text-yellow-600' : 'text-slate-600'
           }`} />
         </div>
         <div className="flex-1">
           <div className="flex items-center gap-2">
-            <span className="font-medium text-gray-900">
+            <span className="font-medium text-slate-800">
               {model || 'Camera'}
             </span>
             <span className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs ${
-              statusColor === 'green' ? 'bg-green-100 text-green-700' : 
-              statusColor === 'yellow' ? 'bg-yellow-100 text-yellow-700' : 
-              'bg-gray-100 text-gray-700'
+              statusColor === 'teal' ? 'bg-teal-100 text-teal-700' :
+              statusColor === 'yellow' ? 'bg-yellow-100 text-yellow-700' :
+              'bg-slate-100 text-slate-700'
             }`}>
               <StatusIcon className="w-3 h-3" />
               {statusText}

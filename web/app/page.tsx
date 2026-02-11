@@ -10,18 +10,18 @@ import Link from 'next/link';
 
 export default function Home() {
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className="min-h-screen bg-cloud">
       {/* Header */}
-      <header className="bg-white shadow">
+      <header className="bg-white border-b border-slate-200/60">
         <div className="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <Camera className="w-8 h-8 text-blue-500" />
+              <Camera className="w-8 h-8 text-teal-600" />
               <div>
-                <h1 className="text-2xl font-bold text-gray-900">
+                <h1 className="text-2xl font-semibold text-slate-800">
                   Camera Control
                 </h1>
-                <p className="text-sm text-gray-500">
+                <p className="text-sm text-slate-500">
                   Sony A7R III via gphoto2
                 </p>
               </div>
@@ -29,21 +29,21 @@ export default function Home() {
             <div className="flex items-center gap-3">
               <Link
                 href="/batch"
-                className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors"
+                className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 rounded-2xl hover:bg-slate-200 transition-colors"
               >
                 <Layers className="w-5 h-5" />
                 <span>Batch</span>
               </Link>
               <Link
                 href="/lights"
-                className="flex items-center gap-2 px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors"
+                className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-2xl hover:bg-teal-700 transition-colors shadow-teal-glow"
               >
                 <Lightbulb className="w-5 h-5" />
                 <span>Lights</span>
               </Link>
               <Link
                 href="/gallery"
-                className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+                className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 rounded-2xl hover:bg-slate-200 transition-colors"
               >
                 <Images className="w-5 h-5" />
                 <span>Gallery</span>
@@ -76,9 +76,9 @@ export default function Home() {
       </main>
 
       {/* Footer */}
-      <footer className="bg-white border-t mt-12">
+      <footer className="bg-white border-t border-slate-200/60 mt-12">
         <div className="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
-          <p className="text-center text-sm text-gray-500">
+          <p className="text-center text-sm text-slate-500">
             Camera Control API - FastAPI + Next.js
           </p>
         </div>

@@ -22,13 +22,16 @@ export const setCameraSetting = (name: string, value: any) =>
   api.post('/api/camera/settings', { name, value });
 
 // Capture
-export const captureImages = (request: CaptureRequest) => 
+export const captureImages = (request: CaptureRequest) =>
   api.post('/api/capture/', request);
 export const getCaptureFolders = () => api.get('/api/capture/folders');
-export const getFolderContents = (folder: string) => 
+export const getFolderContents = (folder: string) =>
   api.get(`/api/capture/folders/${folder}`);
-export const deleteFolder = (folder: string) => 
+export const deleteFolder = (folder: string) =>
   api.delete(`/api/capture/folders/${folder}`);
+export const browsePath = (path: string = "") =>
+  api.get(`/api/capture/browse/${path}`);
+export const getMediaUrl = (path: string) => `${API_BASE_URL}/media/captures/${path}`;
 
 // Live View
 export const getLiveViewStatus = () => api.get('/api/liveview/status');

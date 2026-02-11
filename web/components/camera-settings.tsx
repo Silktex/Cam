@@ -5,7 +5,7 @@ import { getCameraSettings, setCameraSetting, getCameraStatus, type CameraSettin
 import { Settings, RefreshCw, Loader2, Star, ChevronDown, ChevronUp, Aperture, Gauge, Focus, Palette, Image, Zap, RotateCcw, Eye } from 'lucide-react';
 import { useState, useEffect, useMemo } from 'react';
 
-// ─── Recommended values for Sony A7R III lightbox photography (exact gphoto2 config names & values) ───
+// Recommended values for Sony A7R III lightbox photography (exact gphoto2 config names & values)
 const RECOMMENDATIONS: Record<string, { value: string; reason: string }> = {
   // Exposure Triangle — dark room with LED lights, tripod-mounted, static subject
   'iso':                    { value: '400',                      reason: 'Moderate ISO — balanced noise/exposure for LED lighting in dark room' },
@@ -34,7 +34,7 @@ const RECOMMENDATIONS: Record<string, { value: string; reason: string }> = {
   'sensorcrop':             { value: 'Off',                      reason: 'Use full sensor area for maximum resolution' },
 };
 
-// ─── Setting groups with icons ───
+// Setting groups with icons
 interface SettingGroup {
   label: string;
   icon: React.ReactNode;
@@ -48,41 +48,41 @@ const SETTING_GROUPS: SettingGroup[] = [
   {
     label: 'Exposure Triangle',
     icon: <Aperture className="w-4 h-4" />,
-    color: 'text-amber-700',
-    bgColor: 'bg-amber-50',
-    borderColor: 'border-amber-200',
+    color: 'text-teal-700',
+    bgColor: 'bg-teal-50',
+    borderColor: 'border-teal-200',
     keywords: ['iso', 'f-number', 'shutterspeed', 'exposurecompensation', 'expprogram'],
   },
   {
     label: 'Focus',
     icon: <Focus className="w-4 h-4" />,
-    color: 'text-blue-700',
-    bgColor: 'bg-blue-50',
-    borderColor: 'border-blue-200',
+    color: 'text-slate-700',
+    bgColor: 'bg-slate-50',
+    borderColor: 'border-slate-200',
     keywords: ['focusmode', 'focusarea', 'manualfocusdrive'],
   },
   {
     label: 'White Balance & Color',
     icon: <Palette className="w-4 h-4" />,
-    color: 'text-purple-700',
-    bgColor: 'bg-purple-50',
-    borderColor: 'border-purple-200',
+    color: 'text-cyan-700',
+    bgColor: 'bg-cyan-50',
+    borderColor: 'border-cyan-200',
     keywords: ['whitebalance', 'colortemperature'],
   },
   {
     label: 'Image Quality',
     icon: <Image className="w-4 h-4" />,
-    color: 'text-green-700',
-    bgColor: 'bg-green-50',
-    borderColor: 'border-green-200',
+    color: 'text-teal-700',
+    bgColor: 'bg-teal-50',
+    borderColor: 'border-teal-200',
     keywords: ['imagequality', 'imagesize', 'aspectratio'],
   },
   {
     label: 'Drive & Capture',
     icon: <Zap className="w-4 h-4" />,
-    color: 'text-orange-700',
-    bgColor: 'bg-orange-50',
-    borderColor: 'border-orange-200',
+    color: 'text-slate-700',
+    bgColor: 'bg-slate-50',
+    borderColor: 'border-slate-200',
     keywords: ['capturemode', 'capturetarget'],
   },
   {
@@ -232,14 +232,14 @@ export function CameraSettings() {
   }, [settings]);
 
   return (
-    <div className="bg-white rounded-lg shadow overflow-hidden">
+    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-5 py-4 border-b bg-gray-50">
+      <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-slate-50">
         <div className="flex items-center gap-2">
-          <Settings className="w-5 h-5 text-gray-700" />
-          <h2 className="text-lg font-semibold text-gray-900">Camera Settings</h2>
+          <Settings className="w-5 h-5 text-slate-700" />
+          <h2 className="text-lg font-semibold text-slate-800">Camera Settings</h2>
           {isConnected && settings && (
-            <span className="text-xs text-gray-400 ml-1">({settings.length} total)</span>
+            <span className="text-xs text-slate-400 ml-1">({settings.length} total)</span>
           )}
         </div>
         <div className="flex items-center gap-2">
@@ -248,7 +248,7 @@ export function CameraSettings() {
               onClick={applyRecommended}
               disabled={applyingPreset}
               title="Apply all recommended lightbox settings"
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-100 disabled:opacity-50 transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-teal-50 text-teal-700 border border-teal-200 rounded-xl hover:bg-teal-100 disabled:opacity-50 transition-colors"
             >
               {applyingPreset ? <Loader2 className="w-3 h-3 animate-spin" /> : <Star className="w-3 h-3" />}
               Apply Recommended
@@ -256,7 +256,7 @@ export function CameraSettings() {
           )}
           <button
             onClick={() => queryClient.invalidateQueries({ queryKey: ['camera', 'settings'] })}
-            className="p-1.5 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100 transition-colors"
+            className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
             title="Refresh settings"
           >
             <RefreshCw className="w-4 h-4" />
@@ -266,16 +266,16 @@ export function CameraSettings() {
 
       {/* Recommendation Score */}
       {isConnected && matchCount.total > 0 && (
-        <div className="px-5 py-2.5 bg-gradient-to-r from-emerald-50 to-blue-50 border-b flex items-center justify-between">
+        <div className="px-5 py-2.5 bg-teal-50/50 border-b border-slate-100 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Eye className="w-4 h-4 text-emerald-600" />
-            <span className="text-xs text-gray-600">
-              Lightbox Preset: <strong className="text-emerald-700">{matchCount.matching}/{matchCount.total}</strong> recommended settings applied
+            <Eye className="w-4 h-4 text-teal-600" />
+            <span className="text-xs text-slate-600">
+              Lightbox Preset: <strong className="text-teal-700">{matchCount.matching}/{matchCount.total}</strong> recommended settings applied
             </span>
           </div>
-          <div className="w-24 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+          <div className="w-24 h-1.5 bg-slate-200 rounded-full overflow-hidden">
             <div
-              className="h-full bg-emerald-500 rounded-full transition-all"
+              className="h-full bg-teal-500 rounded-full transition-all"
               style={{ width: `${matchCount.total ? (matchCount.matching / matchCount.total) * 100 : 0}%` }}
             />
           </div>
@@ -285,20 +285,20 @@ export function CameraSettings() {
       {/* Body */}
       <div className="p-4">
         {!isConnected ? (
-          <div className="text-sm text-gray-500 text-center py-8">
+          <div className="text-sm text-slate-500 text-center py-8">
             Connect camera to view and adjust settings
           </div>
         ) : isLoading ? (
           <div className="flex flex-col items-center justify-center py-8 gap-2">
-            <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
-            <span className="text-sm text-gray-400">Loading settings…</span>
+            <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
+            <span className="text-sm text-slate-400">Loading settings...</span>
           </div>
         ) : (
           <div className="space-y-4">
             {groupedSettings.map(({ group, settings: groupSettings }) => {
               const isCollapsed = collapsedGroups.has(group.label);
               return (
-                <div key={group.label} className={`rounded-lg border ${group.borderColor} overflow-hidden`}>
+                <div key={group.label} className={`rounded-xl border ${group.borderColor} overflow-hidden`}>
                   {/* Group header */}
                   <button
                     onClick={() => toggleGroup(group.label)}
@@ -307,17 +307,17 @@ export function CameraSettings() {
                     <div className="flex items-center gap-2">
                       <span className={group.color}>{group.icon}</span>
                       <span className={`text-sm font-semibold ${group.color}`}>{group.label}</span>
-                      <span className="text-xs text-gray-400">({groupSettings.length})</span>
+                      <span className="text-xs text-slate-400">({groupSettings.length})</span>
                     </div>
                     {isCollapsed
-                      ? <ChevronDown className="w-4 h-4 text-gray-400" />
-                      : <ChevronUp className="w-4 h-4 text-gray-400" />
+                      ? <ChevronDown className="w-4 h-4 text-slate-400" />
+                      : <ChevronUp className="w-4 h-4 text-slate-400" />
                     }
                   </button>
 
                   {/* Group settings */}
                   {!isCollapsed && (
-                    <div className="divide-y divide-gray-100 px-4">
+                    <div className="divide-y divide-slate-100 px-4">
                       {groupSettings.map(setting => (
                         <SettingControl
                           key={setting.name}
@@ -340,7 +340,7 @@ export function CameraSettings() {
               <div>
                 <button
                   onClick={() => setShowAll(prev => !prev)}
-                  className="w-full flex items-center justify-center gap-1.5 py-2 text-xs text-gray-500 hover:text-gray-700 border border-dashed border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                  className="w-full flex items-center justify-center gap-1.5 py-2 text-xs text-slate-500 hover:text-slate-700 border border-dashed border-slate-300 rounded-xl hover:bg-slate-50 transition-colors"
                 >
                   {showAll
                     ? <><ChevronUp className="w-3 h-3" /> Hide {ungroupedSettings.length} other settings</>
@@ -349,7 +349,7 @@ export function CameraSettings() {
                 </button>
 
                 {showAll && (
-                  <div className="mt-3 rounded-lg border border-gray-200 divide-y divide-gray-100 px-4">
+                  <div className="mt-3 rounded-xl border border-slate-200 divide-y divide-slate-100 px-4">
                     {ungroupedSettings.map(setting => (
                       <SettingControl
                         key={setting.name}
@@ -372,7 +372,7 @@ export function CameraSettings() {
   );
 }
 
-// ─── Individual Setting Control ───
+// Individual Setting Control
 
 function SettingControl({
   setting,
@@ -414,12 +414,12 @@ function SettingControl({
     return (
       <div className="flex justify-between items-center py-3">
         <div>
-          <span className="text-sm font-medium text-gray-700">{setting.label}</span>
+          <span className="text-sm font-medium text-slate-700">{setting.label}</span>
           {isRecommended && (
             <RecommendedBadge rec={recommendation!} matches={matchesRec} />
           )}
         </div>
-        <span className="text-sm text-gray-400 font-mono">{String(setting.value)}</span>
+        <span className="text-sm text-slate-400 font-mono">{String(setting.value)}</span>
       </div>
     );
   }
@@ -430,7 +430,7 @@ function SettingControl({
       <div className="py-3">
         <div className="flex items-center justify-between mb-1.5">
           <div className="flex items-center gap-2 flex-wrap">
-            <label className="text-sm font-medium text-gray-700">{setting.label}</label>
+            <label className="text-sm font-medium text-slate-700">{setting.label}</label>
             {isRecommended && (
               <RecommendedBadge rec={recommendation!} matches={matchesRec} onApply={!matchesRec ? applyRecommended : undefined} />
             )}
@@ -439,7 +439,7 @@ function SettingControl({
             <button
               onClick={() => onApply(value)}
               disabled={isUpdating}
-              className="px-2.5 py-1 text-xs font-medium bg-blue-500 text-white rounded-md hover:bg-blue-600 disabled:bg-gray-300 transition-colors"
+              className="px-2.5 py-1 text-xs font-medium bg-teal-600 text-white rounded-lg hover:bg-teal-700 disabled:bg-slate-300 transition-colors"
             >
               Apply
             </button>
@@ -448,8 +448,8 @@ function SettingControl({
         <select
           value={String(value)}
           onChange={(e) => onChange(e.target.value)}
-          className={`w-full px-3 py-1.5 text-sm border rounded-md focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors
-            ${matchesRec ? 'border-emerald-300 bg-emerald-50/50' : 'border-gray-300 bg-white'}`}
+          className={`w-full px-3 py-1.5 text-sm border rounded-xl focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-colors
+            ${matchesRec ? 'border-teal-300 bg-teal-50/50' : 'border-slate-200 bg-white'}`}
         >
           {setting.choices.map(choice => (
             <option key={choice} value={choice}>{choice}</option>
@@ -465,18 +465,18 @@ function SettingControl({
       <div className="py-3">
         <div className="flex items-center justify-between mb-1.5">
           <div className="flex items-center gap-2">
-            <label className="text-sm font-medium text-gray-700">{setting.label}</label>
+            <label className="text-sm font-medium text-slate-700">{setting.label}</label>
             {isRecommended && (
               <RecommendedBadge rec={recommendation!} matches={matchesRec} />
             )}
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-sm font-mono text-gray-600">{value}</span>
+            <span className="text-sm font-mono text-slate-600">{value}</span>
             {hasChanged && (
               <button
                 onClick={() => onApply(value)}
                 disabled={isUpdating}
-                className="px-2.5 py-1 text-xs font-medium bg-blue-500 text-white rounded-md hover:bg-blue-600 disabled:bg-gray-300 transition-colors"
+                className="px-2.5 py-1 text-xs font-medium bg-teal-600 text-white rounded-lg hover:bg-teal-700 disabled:bg-slate-300 transition-colors"
               >
                 Apply
               </button>
@@ -490,7 +490,7 @@ function SettingControl({
           step={setting.range.step}
           value={value}
           onChange={(e) => onChange(parseFloat(e.target.value))}
-          className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-500"
+          className="w-full"
         />
       </div>
     );
@@ -501,7 +501,7 @@ function SettingControl({
     return (
       <div className="flex items-center justify-between py-3">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-gray-700">{setting.label}</span>
+          <span className="text-sm font-medium text-slate-700">{setting.label}</span>
           {isRecommended && (
             <RecommendedBadge rec={recommendation!} matches={matchesRec} />
           )}
@@ -514,7 +514,7 @@ function SettingControl({
           }}
           disabled={isUpdating}
           className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors
-            ${value ? 'bg-blue-500' : 'bg-gray-300'}
+            ${value ? 'bg-teal-500' : 'bg-slate-300'}
             ${isUpdating ? 'opacity-50' : ''}`}
         >
           <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-md transition-transform
@@ -530,7 +530,7 @@ function SettingControl({
     <div className="py-3">
       <div className="flex items-center justify-between mb-1.5">
         <div className="flex items-center gap-2">
-          <label className="text-sm font-medium text-gray-700">{setting.label}</label>
+          <label className="text-sm font-medium text-slate-700">{setting.label}</label>
           {isRecommended && (
             <RecommendedBadge rec={recommendation!} matches={matchesRec} />
           )}
@@ -539,7 +539,7 @@ function SettingControl({
           <button
             onClick={() => onApply(value)}
             disabled={isUpdating}
-            className="px-2.5 py-1 text-xs font-medium bg-blue-500 text-white rounded-md hover:bg-blue-600 disabled:bg-gray-300 transition-colors"
+            className="px-2.5 py-1 text-xs font-medium bg-teal-600 text-white rounded-lg hover:bg-teal-700 disabled:bg-slate-300 transition-colors"
           >
             Apply
           </button>
@@ -549,13 +549,13 @@ function SettingControl({
         type="text"
         value={String(value ?? '')}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+        className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
       />
     </div>
   );
 }
 
-// ─── Recommended Badge ───
+// Recommended Badge
 
 function RecommendedBadge({
   rec,
@@ -569,20 +569,20 @@ function RecommendedBadge({
   return (
     <span className="inline-flex items-center gap-1 group relative">
       {matches ? (
-        <span className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-700">
+        <span className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-teal-100 text-teal-700">
           <Star className="w-2.5 h-2.5 fill-current" /> Recommended
         </span>
       ) : (
         <button
           onClick={(e) => { e.stopPropagation(); onApply?.(); }}
-          className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-700 hover:bg-amber-200 transition-colors cursor-pointer"
+          className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors cursor-pointer"
           title={`Set to ${rec.value}`}
         >
           <RotateCcw className="w-2.5 h-2.5" /> Set {rec.value}
         </button>
       )}
       {/* Tooltip */}
-      <span className="invisible group-hover:visible absolute left-0 top-full mt-1 z-10 px-2.5 py-1.5 bg-gray-900 text-white text-[11px] rounded-md shadow-lg whitespace-nowrap max-w-[250px]">
+      <span className="invisible group-hover:visible absolute left-0 top-full mt-1 z-10 px-2.5 py-1.5 bg-slate-900 text-white text-[11px] rounded-lg shadow-lg whitespace-nowrap max-w-[250px]">
         {rec.reason}
       </span>
     </span>

@@ -541,17 +541,30 @@ class CameraService:
                         use_camera_wb=True,
                         output_bps=16,
                         no_auto_bright=True,
-                        output_color=rawpy.ColorSpace.AdobeRGB,
+                        output_color=rawpy.ColorSpace.Adobe,
                     )
                     tiff_filename = f"{stem}.tiff"
                     tiff_path = tiff_dir / tiff_filename
-                    
-                    tiff_img = PILImage.fromarray(rgb_16)
-                    tiff_img.save(str(tiff_path), format="TIFF", compression="tiff_adobe_deflate")
+
+                    # Try tifffile for proper 16-bit support, fallback to imageio/PIL
+                    try:
+                        import tifffile
+                        tifffile.imwrite(str(tiff_path), rgb_16, compression='lzw')
+                    except ImportError:
+                        try:
+                            import imageio.v3 as iio
+                            iio.imwrite(str(tiff_path), rgb_16)
+                        except ImportError:
+                            # Fallback: save as 8-bit TIFF using PIL
+                            rgb_8_tiff = (rgb_16 / 256).astype('uint8')
+                            tiff_img = PILImage.fromarray(rgb_8_tiff)
+                            tiff_img.save(str(tiff_path), format="TIFF", compression="tiff_lzw")
+                            logger.info("Saved as 8-bit TIFF (install tifffile for 16-bit)")
+
                     result["tiff_url"] = f"/media/captures/{folder_name}/tiff/{tiff_filename}"
                     logger.info(f"TIFF saved: {tiff_path}")
                 except Exception as e:
-                    logger.warning(f"TIFF conversion failed: {e}")
+                    logger.warning(f"TIFF conversion failed: {e}", exc_info=True)
                 
                 # ── 2 & 3. Full webview + thumbnail (8-bit for JPEG) ──
                 try:

@@ -49,16 +49,16 @@ export function CameraControl() {
   const isPending = connectMutation.isPending || disconnectMutation.isPending || troubleshootMutation.isPending;
 
   return (
-    <div className="bg-white rounded-lg shadow p-4">
+    <div className="bg-white border border-slate-200 rounded-2xl p-4">
       <div className="flex gap-2">
         {/* Main connect/disconnect button */}
         <button
           onClick={() => isConnected ? disconnectMutation.mutate() : connectMutation.mutate()}
           disabled={isPending}
-          className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors disabled:opacity-50 ${
-            isConnected 
-              ? 'bg-gray-100 text-gray-700 hover:bg-gray-200' 
-              : 'bg-blue-500 text-white hover:bg-blue-600'
+          className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-medium transition-colors disabled:opacity-50 ${
+            isConnected
+              ? 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              : 'bg-teal-600 text-white hover:bg-teal-700 shadow-teal-glow'
           }`}
         >
           {(connectMutation.isPending || disconnectMutation.isPending) ? (
@@ -74,7 +74,7 @@ export function CameraControl() {
           onClick={() => troubleshootMutation.mutate()}
           disabled={isPending}
           title="Kill processes & reset"
-          className="px-3 py-3 bg-orange-100 text-orange-700 rounded-lg hover:bg-orange-200 transition-colors disabled:opacity-50"
+          className="px-3 py-3 bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200 transition-colors disabled:opacity-50"
         >
           {troubleshootMutation.isPending ? (
             <Loader2 className="w-5 h-5 animate-spin" />
@@ -85,7 +85,7 @@ export function CameraControl() {
       </div>
 
       {message && (
-        <div className="mt-2 p-2 bg-gray-50 rounded text-sm text-gray-600">
+        <div className="mt-2 p-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-600">
           {message}
         </div>
       )}

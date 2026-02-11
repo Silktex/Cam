@@ -59,18 +59,18 @@ export function StreamViewer() {
   const isStreaming = streamSrc !== null;
 
   return (
-    <div className="bg-white rounded-lg shadow p-4">
+    <div className="bg-white border border-slate-200 rounded-2xl p-4">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
-          <Video className="w-5 h-5 text-gray-700" />
-          <h2 className="text-lg font-semibold text-gray-900">Live View</h2>
+          <Video className="w-5 h-5 text-slate-700" />
+          <h2 className="text-lg font-semibold text-slate-800">Live View</h2>
         </div>
-        
+
         <div className="flex items-center gap-2">
           {isStreaming ? (
             <button
               onClick={stopStream}
-              className="flex items-center gap-1 px-3 py-1 text-sm bg-red-100 text-red-700 rounded hover:bg-red-200 transition-colors"
+              className="flex items-center gap-1 px-3 py-1 text-sm bg-red-50 text-red-700 rounded-xl hover:bg-red-100 transition-colors"
             >
               <VideoOff className="w-4 h-4" />
               Stop
@@ -79,17 +79,17 @@ export function StreamViewer() {
             <button
               onClick={startStream}
               disabled={!isConnected}
-              className="flex items-center gap-1 px-3 py-1 text-sm bg-green-100 text-green-700 rounded hover:bg-green-200 disabled:bg-gray-100 disabled:text-gray-400 transition-colors"
+              className="flex items-center gap-1 px-3 py-1 text-sm bg-teal-50 text-teal-700 rounded-xl hover:bg-teal-100 disabled:bg-slate-100 disabled:text-slate-400 transition-colors"
             >
               <Video className="w-4 h-4" />
               Start
             </button>
           )}
-          
+
           <button
             onClick={refreshStream}
             disabled={!isConnected}
-            className="p-1 text-gray-500 hover:text-gray-700 disabled:text-gray-300 transition-colors"
+            className="p-1 text-slate-500 hover:text-slate-700 disabled:text-slate-300 transition-colors"
             title="Refresh stream"
           >
             <RefreshCw className="w-4 h-4" />
@@ -97,14 +97,14 @@ export function StreamViewer() {
         </div>
       </div>
 
-      <div className="relative aspect-video bg-gray-900 rounded-lg overflow-hidden">
+      <div className="relative aspect-video bg-slate-900 rounded-xl overflow-hidden">
         {!isConnected ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-400">
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400">
             <VideoOff className="w-12 h-12 mb-2" />
             <span>Camera not connected</span>
           </div>
         ) : !isStreaming ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-400">
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400">
             <Video className="w-12 h-12 mb-2" />
             <span>Click Start to begin streaming</span>
           </div>
@@ -118,9 +118,9 @@ export function StreamViewer() {
         )}
       </div>
 
-      <div className="mt-2 flex items-center justify-between text-xs text-gray-500">
+      <div className="mt-2 flex items-center justify-between text-xs text-slate-500">
         <span>{model}</span>
-        <span className={isStreaming ? 'text-green-600' : 'text-gray-400'}>
+        <span className={isStreaming ? 'text-teal-600' : 'text-slate-400'}>
           {isStreaming ? '● Streaming' : '○ Stopped'}
         </span>
       </div>

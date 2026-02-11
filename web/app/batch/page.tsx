@@ -39,12 +39,12 @@ export default function BatchCapturePage() {
   const [folder, setFolder] = useState(`batch_${Date.now()}`);
   const [prefix, setPrefix] = useState('capture');
   const [lightDelay, setLightDelay] = useState(2.0);
-  
+
   const [isRunning, setIsRunning] = useState(false);
   const [progress, setProgress] = useState<BatchProgress | null>(null);
   const [result, setResult] = useState<BatchResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  
+
   const wsRef = useRef<WebSocket | null>(null);
 
   const startBatchCapture = useCallback(() => {
@@ -137,11 +137,11 @@ export default function BatchCapturePage() {
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'waiting_light': return 'text-yellow-400';
-      case 'capturing': return 'text-blue-400';
-      case 'processing': return 'text-green-400';
-      case 'complete': return 'text-green-500';
+      case 'capturing': return 'text-teal-400';
+      case 'processing': return 'text-teal-500';
+      case 'complete': return 'text-teal-500';
       case 'error': return 'text-red-500';
-      default: return 'text-gray-400';
+      default: return 'text-slate-400';
     }
   };
 
@@ -153,10 +153,10 @@ export default function BatchCapturePage() {
     lights.push(
       <div
         key="top"
-        className={`w-10 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all
-          ${topIsActive ? 'bg-amber-500 text-black animate-pulse' : ''}
-          ${topIsComplete ? 'bg-green-500 text-white' : ''}
-          ${!topIsActive && !topIsComplete ? 'bg-gray-700 text-gray-400' : ''}
+        className={`w-10 h-8 rounded-xl flex items-center justify-center text-xs font-bold transition-all
+          ${topIsActive ? 'bg-teal-500 text-slate-900 animate-pulse' : ''}
+          ${topIsComplete ? 'bg-teal-600 text-white' : ''}
+          ${!topIsActive && !topIsComplete ? 'bg-slate-700 text-slate-400' : ''}
         `}
       >
         Top
@@ -170,10 +170,10 @@ export default function BatchCapturePage() {
       lights.push(
         <div
           key={i}
-          className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all
-            ${isActive ? 'bg-amber-500 text-black animate-pulse' : ''}
-            ${isComplete ? 'bg-green-500 text-white' : ''}
-            ${!isActive && !isComplete ? 'bg-gray-700 text-gray-400' : ''}
+          className={`w-8 h-8 rounded-xl flex items-center justify-center text-xs font-bold transition-all
+            ${isActive ? 'bg-teal-500 text-slate-900 animate-pulse' : ''}
+            ${isComplete ? 'bg-teal-600 text-white' : ''}
+            ${!isActive && !isComplete ? 'bg-slate-700 text-slate-400' : ''}
           `}
         >
           {i}
@@ -184,21 +184,21 @@ export default function BatchCapturePage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white p-6">
+    <div className="min-h-screen bg-slate-900 text-white p-6">
       {/* Header */}
       <header className="max-w-4xl mx-auto mb-8">
         <div className="flex items-center gap-4 mb-4">
           <Link
             href="/"
-            className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
+            className="p-2 rounded-xl bg-slate-800 border border-slate-700 hover:bg-slate-700 transition-colors"
           >
             <ArrowLeft className="w-5 h-5" />
           </Link>
           <div className="flex items-center gap-3">
-            <Camera className="w-8 h-8 text-amber-400" />
+            <Camera className="w-8 h-8 text-teal-400" />
             <div>
-              <h1 className="text-2xl font-bold">Batch Capture</h1>
-              <p className="text-sm text-gray-400">Multi-light sequential photography</p>
+              <h1 className="text-2xl font-semibold">Batch Capture</h1>
+              <p className="text-sm text-slate-400">Multi-light sequential photography</p>
             </div>
           </div>
         </div>
@@ -207,35 +207,35 @@ export default function BatchCapturePage() {
       <main className="max-w-4xl mx-auto space-y-6">
         {/* Configuration */}
         {!isRunning && !result && (
-          <div className="bg-white/5 backdrop-blur rounded-xl p-6 border border-white/10">
+          <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-6">
             <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-              <Lightbulb className="w-5 h-5 text-amber-400" />
+              <Lightbulb className="w-5 h-5 text-teal-400" />
               Capture Settings
             </h2>
-            
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
               <div>
-                <label className="block text-sm text-gray-400 mb-2">Folder Name</label>
+                <label className="block text-sm text-slate-400 mb-2">Folder Name</label>
                 <input
                   type="text"
                   value={folder}
                   onChange={(e) => setFolder(e.target.value)}
-                  className="w-full px-4 py-2 bg-white/10 rounded-lg border border-white/20 focus:border-amber-500 focus:outline-none"
+                  className="w-full px-4 py-2 bg-slate-700 rounded-xl border border-slate-600 focus:border-teal-500 focus:outline-none"
                   placeholder="session_1"
                 />
               </div>
               <div>
-                <label className="block text-sm text-gray-400 mb-2">Filename Prefix</label>
+                <label className="block text-sm text-slate-400 mb-2">Filename Prefix</label>
                 <input
                   type="text"
                   value={prefix}
                   onChange={(e) => setPrefix(e.target.value)}
-                  className="w-full px-4 py-2 bg-white/10 rounded-lg border border-white/20 focus:border-amber-500 focus:outline-none"
+                  className="w-full px-4 py-2 bg-slate-700 rounded-xl border border-slate-600 focus:border-teal-500 focus:outline-none"
                   placeholder="capture"
                 />
               </div>
               <div>
-                <label className="block text-sm text-gray-400 mb-2">Light Stabilize Delay (s)</label>
+                <label className="block text-sm text-slate-400 mb-2">Light Stabilize Delay (s)</label>
                 <input
                   type="number"
                   value={lightDelay}
@@ -243,23 +243,23 @@ export default function BatchCapturePage() {
                   min={0.5}
                   max={10}
                   step={0.5}
-                  className="w-full px-4 py-2 bg-white/10 rounded-lg border border-white/20 focus:border-amber-500 focus:outline-none"
+                  className="w-full px-4 py-2 bg-slate-700 rounded-xl border border-slate-600 focus:border-teal-500 focus:outline-none"
                 />
               </div>
             </div>
 
-            <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4 mb-6">
-              <p className="text-sm text-amber-200">
+            <div className="bg-teal-500/10 border border-teal-500/30 rounded-xl p-4 mb-6">
+              <p className="text-sm text-teal-200">
                 <strong>Capture Sequence:</strong> Top Light → Side 1 → Side 2 → ... → Side 8
                 <br />
-                <span className="text-gray-400">Each light turns ON, captures, then OFF before the next. Wait {lightDelay}s per light. Total: 9 images.</span>
+                <span className="text-slate-400">Each light turns ON, captures, then OFF before the next. Wait {lightDelay}s per light. Total: 9 images.</span>
               </p>
             </div>
 
             <button
               onClick={startBatchCapture}
-              className="w-full py-3 bg-gradient-to-r from-amber-500 to-orange-500 rounded-lg font-semibold
-                hover:from-amber-400 hover:to-orange-400 transition-all flex items-center justify-center gap-2"
+              className="w-full py-3 bg-teal-500 text-slate-900 rounded-2xl font-semibold
+                hover:bg-teal-400 transition-all flex items-center justify-center gap-2 shadow-teal-glow"
             >
               <Play className="w-5 h-5" />
               Start Batch Capture
@@ -269,12 +269,12 @@ export default function BatchCapturePage() {
 
         {/* Progress */}
         {isRunning && progress && (
-          <div className="bg-white/5 backdrop-blur rounded-xl p-6 border border-white/10">
+          <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-6">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-lg font-semibold">Capturing...</h2>
               <button
                 onClick={cancelBatchCapture}
-                className="px-4 py-2 bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500/30 transition-colors flex items-center gap-2"
+                className="px-4 py-2 bg-red-500/20 text-red-400 rounded-xl hover:bg-red-500/30 transition-colors flex items-center gap-2"
               >
                 <Square className="w-4 h-4" />
                 Cancel
@@ -287,9 +287,9 @@ export default function BatchCapturePage() {
             </div>
 
             {/* Progress bar */}
-            <div className="h-2 bg-gray-700 rounded-full mb-4 overflow-hidden">
+            <div className="h-2 bg-slate-700 rounded-full mb-4 overflow-hidden">
               <div
-                className="h-full bg-gradient-to-r from-amber-500 to-orange-500 transition-all duration-500"
+                className="h-full bg-teal-500 transition-all duration-500"
                 style={{ width: `${(progress.current_step / progress.total_steps) * 100}%` }}
               />
             </div>
@@ -301,7 +301,7 @@ export default function BatchCapturePage() {
                 {progress.status === 'capturing' && <Camera className="w-5 h-5 inline mr-2 animate-pulse" />}
                 {progress.message}
               </p>
-              <p className="text-sm text-gray-400 mt-2">
+              <p className="text-sm text-slate-400 mt-2">
                 Step {progress.current_step} of {progress.total_steps} • {progress.captures.length} captured
               </p>
             </div>
@@ -310,15 +310,15 @@ export default function BatchCapturePage() {
 
         {/* Error */}
         {error && (
-          <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-6 flex items-center gap-4">
+          <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-6 flex items-center gap-4">
             <AlertCircle className="w-8 h-8 text-red-500 flex-shrink-0" />
             <div>
               <h3 className="font-semibold text-red-400">Error</h3>
-              <p className="text-gray-300">{error}</p>
+              <p className="text-slate-300">{error}</p>
             </div>
             <button
               onClick={() => { setError(null); setResult(null); }}
-              className="ml-auto px-4 py-2 bg-white/10 rounded-lg hover:bg-white/20"
+              className="ml-auto px-4 py-2 bg-slate-700 rounded-xl hover:bg-slate-600"
             >
               Try Again
             </button>
@@ -328,27 +328,27 @@ export default function BatchCapturePage() {
         {/* Result */}
         {result && (
           <div className="space-y-6">
-            <div className={`rounded-xl p-6 border ${result.success ? 'bg-green-500/10 border-green-500/30' : 'bg-red-500/10 border-red-500/30'}`}>
+            <div className={`rounded-2xl p-6 border ${result.success ? 'bg-teal-500/10 border-teal-500/30' : 'bg-red-500/10 border-red-500/30'}`}>
               <div className="flex items-center gap-4 mb-4">
                 {result.success ? (
-                  <CheckCircle className="w-10 h-10 text-green-500" />
+                  <CheckCircle className="w-10 h-10 text-teal-500" />
                 ) : (
                   <AlertCircle className="w-10 h-10 text-red-500" />
                 )}
                 <div>
-                  <h2 className="text-xl font-bold">
+                  <h2 className="text-xl font-semibold">
                     {result.success ? 'Batch Capture Complete!' : 'Batch Capture Finished with Errors'}
                   </h2>
-                  <p className="text-gray-400">
+                  <p className="text-slate-400">
                     {result.total_captures} images captured in {result.duration_seconds.toFixed(1)} seconds
                   </p>
                 </div>
               </div>
 
               {result.errors.length > 0 && (
-                <div className="bg-red-500/20 rounded-lg p-4 mb-4">
+                <div className="bg-red-500/20 rounded-xl p-4 mb-4">
                   <p className="font-semibold text-red-400 mb-2">Errors:</p>
-                  <ul className="list-disc list-inside text-sm text-gray-300">
+                  <ul className="list-disc list-inside text-sm text-slate-300">
                     {result.errors.map((err, i) => (
                       <li key={i}>{err}</li>
                     ))}
@@ -359,13 +359,13 @@ export default function BatchCapturePage() {
               <div className="flex gap-3">
                 <button
                   onClick={() => { setResult(null); setFolder(`batch_${Date.now()}`); }}
-                  className="px-6 py-2 bg-amber-500 text-black rounded-lg font-semibold hover:bg-amber-400"
+                  className="px-6 py-2 bg-teal-500 text-slate-900 rounded-xl font-semibold hover:bg-teal-400"
                 >
                   New Batch
                 </button>
                 <Link
                   href={`/gallery?folder=${result.folder}`}
-                  className="px-6 py-2 bg-white/10 rounded-lg hover:bg-white/20"
+                  className="px-6 py-2 bg-slate-700 rounded-xl hover:bg-slate-600"
                 >
                   View in Gallery
                 </Link>
@@ -373,16 +373,16 @@ export default function BatchCapturePage() {
             </div>
 
             {/* Captured images grid */}
-            <div className="bg-white/5 backdrop-blur rounded-xl p-6 border border-white/10">
+            <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-6">
               <h3 className="text-lg font-semibold mb-4">Captured Images</h3>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {result.captures.map((capture, i) => (
-                  <div key={i} className="bg-white/5 rounded-lg p-3">
-                    <div className="aspect-square bg-gray-800 rounded-lg mb-2 flex items-center justify-center">
-                      <Camera className="w-8 h-8 text-gray-600" />
+                  <div key={i} className="bg-slate-700/50 rounded-xl p-3">
+                    <div className="aspect-square bg-slate-800 rounded-xl mb-2 flex items-center justify-center">
+                      <Camera className="w-8 h-8 text-slate-600" />
                     </div>
-                    <p className="text-xs text-gray-400 truncate">{capture.filename}</p>
-                    <p className="text-xs text-amber-400">{capture.light_name}</p>
+                    <p className="text-xs text-slate-400 truncate">{capture.filename}</p>
+                    <p className="text-xs text-teal-400">{capture.light_name}</p>
                   </div>
                 ))}
               </div>
