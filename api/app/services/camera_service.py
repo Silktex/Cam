@@ -382,8 +382,14 @@ class CameraService:
     
     # =========== Capture ===========
     
-    def capture_image(self, folder: str, prefix: str = "capture") -> Dict[str, Any]:
-        """Capture a single image and save to folder"""
+    def capture_image(self, folder: str, prefix: str = "capture", suffix: str = "") -> Dict[str, Any]:
+        """Capture a single image and save to folder/raw/ subfolder.
+        
+        Args:
+            folder: Capture session folder name
+            prefix: Filename prefix (e.g., 'fabric')
+            suffix: Suffix placed before extension (e.g., 'top', 'side_1')
+        """
         # Stop live view first (outside lock to avoid deadlock)
         if self._live_view_active:
             self._stop_live_view.set()
@@ -395,12 +401,13 @@ class CameraService:
             time.sleep(0.5)  # Extra settle time after live view stops
         
         with self._lock:
-            # Create folder
+            # Create subfolder structure
             folder_path = settings.CAPTURES_DIR / folder
-            folder_path.mkdir(parents=True, exist_ok=True)
+            raw_path = folder_path / "raw"
+            raw_path.mkdir(parents=True, exist_ok=True)
             
-            # Generate filename with milliseconds
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+            # Generate filename: prefix_timestamp_suffix.ext
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             
             # Retry capture up to 3 times
             max_retries = 3
@@ -445,12 +452,13 @@ class CameraService:
                         gp.GP_FILE_TYPE_NORMAL
                     )
                     
-                    # Determine extension
+                    # Determine extension and build filename: prefix_timestamp_suffix.ext
                     ext = Path(file_path.name).suffix or ".ARW"
-                    local_filename = f"{prefix}_{timestamp}{ext}"
-                    local_path = folder_path / local_filename
+                    suffix_part = f"_{suffix}" if suffix else ""
+                    local_filename = f"{prefix}_{timestamp}{suffix_part}{ext}"
+                    local_path = raw_path / local_filename
                     
-                    # Save
+                    # Save to raw/ subfolder
                     camera_file.save(str(local_path))
                     file_size = local_path.stat().st_size
                     logger.info(f"Saved: {local_path} ({file_size} bytes)")
@@ -466,6 +474,9 @@ class CameraService:
                     time.sleep(0.5)
                     self._drain_camera_events()
                     
+                    # Post-process: generate TIFF, thumbnail, full_webview
+                    processed = self._post_process_image(folder_path, local_filename, ext)
+                    
                     event_bus.publish(EventType.CAPTURE_COMPLETE, {
                         "filename": local_filename,
                         "folder": folder,
@@ -476,9 +487,12 @@ class CameraService:
                         "success": True,
                         "filename": local_filename,
                         "filepath": str(local_path),
-                        "file_url": f"/media/captures/{folder}/{local_filename}",
+                        "file_url": f"/media/captures/{folder}/raw/{local_filename}",
                         "file_size": file_size,
-                        "captured_at": datetime.now().isoformat()
+                        "captured_at": datetime.now().isoformat(),
+                        "thumbnail_url": processed.get("thumbnail_url"),
+                        "webview_url": processed.get("webview_url"),
+                        "tiff_url": processed.get("tiff_url"),
                     }
                 
                 except gp.GPhoto2Error as e:
@@ -491,6 +505,90 @@ class CameraService:
             error_msg = f"Capture failed after {max_retries} attempts: {last_error}"
             logger.error(error_msg)
             return {"success": False, "error": error_msg}
+    
+    def _post_process_image(self, folder_path: Path, raw_filename: str, ext: str) -> Dict[str, str]:
+        """
+        Post-process a captured RAW image:
+        1. Convert RAW → 16-bit TIFF (saved to tiff/)
+        2. Generate full web-view JPEG (saved to full_webview/)
+        3. Generate small thumbnail JPEG (saved to thumbnail/)
+        
+        Returns dict with URLs for each derivative.
+        Non-blocking: failures are logged but don't prevent capture success.
+        """
+        result = {}
+        raw_path = folder_path / "raw" / raw_filename
+        stem = Path(raw_filename).stem  # e.g. fabric_20260211_144925_top
+        folder_name = folder_path.name
+        
+        # Create subdirectories
+        tiff_dir = folder_path / "tiff"
+        thumb_dir = folder_path / "thumbnail"
+        webview_dir = folder_path / "full_webview"
+        tiff_dir.mkdir(exist_ok=True)
+        thumb_dir.mkdir(exist_ok=True)
+        webview_dir.mkdir(exist_ok=True)
+        
+        try:
+            import rawpy
+            from PIL import Image as PILImage
+            
+            # Read RAW file
+            with rawpy.imread(str(raw_path)) as raw:
+                # ── 1. TIFF (16-bit, full resolution) ──
+                try:
+                    rgb_16 = raw.postprocess(
+                        use_camera_wb=True,
+                        output_bps=16,
+                        no_auto_bright=True,
+                        output_color=rawpy.ColorSpace.AdobeRGB,
+                    )
+                    tiff_filename = f"{stem}.tiff"
+                    tiff_path = tiff_dir / tiff_filename
+                    
+                    tiff_img = PILImage.fromarray(rgb_16)
+                    tiff_img.save(str(tiff_path), format="TIFF", compression="tiff_adobe_deflate")
+                    result["tiff_url"] = f"/media/captures/{folder_name}/tiff/{tiff_filename}"
+                    logger.info(f"TIFF saved: {tiff_path}")
+                except Exception as e:
+                    logger.warning(f"TIFF conversion failed: {e}")
+                
+                # ── 2 & 3. Full webview + thumbnail (8-bit for JPEG) ──
+                try:
+                    rgb_8 = raw.postprocess(
+                        use_camera_wb=True,
+                        output_bps=8,
+                        no_auto_bright=True,
+                    )
+                    full_img = PILImage.fromarray(rgb_8)
+                    
+                    # Full webview — resize to max 2400px on longest side, JPEG quality 92
+                    webview_filename = f"{stem}.jpg"
+                    webview_path = webview_dir / webview_filename
+                    webview_img = full_img.copy()
+                    webview_img.thumbnail((2400, 2400), PILImage.Resampling.LANCZOS)
+                    webview_img.save(str(webview_path), format="JPEG", quality=92, optimize=True)
+                    result["webview_url"] = f"/media/captures/{folder_name}/full_webview/{webview_filename}"
+                    logger.info(f"Webview saved: {webview_path} ({webview_img.size[0]}x{webview_img.size[1]})")
+                    
+                    # Thumbnail — resize to max 400px, JPEG quality 80
+                    thumb_filename = f"{stem}.jpg"
+                    thumb_path = thumb_dir / thumb_filename
+                    thumb_img = full_img.copy()
+                    thumb_img.thumbnail((400, 400), PILImage.Resampling.LANCZOS)
+                    thumb_img.save(str(thumb_path), format="JPEG", quality=80, optimize=True)
+                    result["thumbnail_url"] = f"/media/captures/{folder_name}/thumbnail/{thumb_filename}"
+                    logger.info(f"Thumbnail saved: {thumb_path} ({thumb_img.size[0]}x{thumb_img.size[1]})")
+                    
+                except Exception as e:
+                    logger.warning(f"Webview/thumbnail generation failed: {e}")
+                    
+        except ImportError:
+            logger.warning("rawpy/Pillow not installed — skipping post-processing. Install: pip install rawpy Pillow")
+        except Exception as e:
+            logger.warning(f"Post-processing failed for {raw_filename}: {e}")
+        
+        return result
     
     def _drain_camera_events(self, timeout_ms: int = 100):
         """Drain any pending camera events to clear the buffer"""

@@ -41,6 +41,9 @@ async def lights_websocket(websocket: WebSocket):
                 await websocket.send_json({"type": "pong"})
                 
             elif msg_type == "get_state":
+                # Force poll ESP32 and send fresh state
+                if light_service.connected:
+                    await light_service._poll_esp32_states()
                 await websocket.send_json({
                     "type": "state_update",
                     "data": {

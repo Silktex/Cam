@@ -6,7 +6,9 @@ import { Camera, ArrowLeft, Play, Square, Loader2, CheckCircle, AlertCircle, Lig
 
 interface CaptureInfo {
   step: number;
-  side_light: number;
+  light_id: number;
+  light_name: string;
+  suffix: string;
   filename: string;
   file_url: string;
   file_size: number;
@@ -73,7 +75,7 @@ export default function BatchCapturePage() {
         case 'started':
           setProgress({
             current_step: 0,
-            total_steps: 8,
+            total_steps: 9,
             current_light: 'Initializing...',
             status: 'starting',
             message: 'Starting batch capture...',
@@ -145,9 +147,26 @@ export default function BatchCapturePage() {
 
   const getLightIndicators = () => {
     const lights = [];
+    // First indicator is Top Light (step 1)
+    const topIsActive = progress && progress.current_step === 1;
+    const topIsComplete = progress && progress.current_step > 1;
+    lights.push(
+      <div
+        key="top"
+        className={`w-10 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all
+          ${topIsActive ? 'bg-amber-500 text-black animate-pulse' : ''}
+          ${topIsComplete ? 'bg-green-500 text-white' : ''}
+          ${!topIsActive && !topIsComplete ? 'bg-gray-700 text-gray-400' : ''}
+        `}
+      >
+        Top
+      </div>
+    );
+    // Side lights 1-8 (steps 2-9)
     for (let i = 1; i <= 8; i++) {
-      const isActive = progress && progress.current_step === i;
-      const isComplete = progress && progress.current_step > i;
+      const step = i + 1; // Side 1 = step 2, Side 2 = step 3, etc.
+      const isActive = progress && progress.current_step === step;
+      const isComplete = progress && progress.current_step > step;
       lights.push(
         <div
           key={i}
@@ -231,9 +250,9 @@ export default function BatchCapturePage() {
 
             <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4 mb-6">
               <p className="text-sm text-amber-200">
-                <strong>Capture Sequence:</strong> Top Light + Side 1 → Side 2 → ... → Side 8
+                <strong>Capture Sequence:</strong> Top Light → Side 1 → Side 2 → ... → Side 8
                 <br />
-                <span className="text-gray-400">Each capture will wait {lightDelay}s for light stabilization. Total: 8 images.</span>
+                <span className="text-gray-400">Each light turns ON, captures, then OFF before the next. Wait {lightDelay}s per light. Total: 9 images.</span>
               </p>
             </div>
 
@@ -363,7 +382,7 @@ export default function BatchCapturePage() {
                       <Camera className="w-8 h-8 text-gray-600" />
                     </div>
                     <p className="text-xs text-gray-400 truncate">{capture.filename}</p>
-                    <p className="text-xs text-amber-400">Side Light {capture.side_light}</p>
+                    <p className="text-xs text-amber-400">{capture.light_name}</p>
                   </div>
                 ))}
               </div>

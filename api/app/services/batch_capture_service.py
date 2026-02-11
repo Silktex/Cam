@@ -22,7 +22,7 @@ class BatchCaptureState:
     is_running: bool = False
     should_cancel: bool = False
     current_step: int = 0
-    total_steps: int = 8
+    total_steps: int = 9  # Top Light + 8 Side Lights
     captures: List[dict] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
     started_at: Optional[datetime] = None
@@ -53,10 +53,10 @@ class BatchCaptureService:
     ) -> BatchCaptureResult:
         """
         Execute a full batch capture sequence:
-        1. Turn on Top Light + Side 1 Light, wait, capture
-        2. Turn off Side 1, turn on Side 2, wait, capture
+        1. Top Light ON, wait, capture with suffix "top", Top Light OFF
+        2. Side 1 ON, wait, capture with suffix "side_1", Side 1 OFF
         3. Repeat through Side 8
-        4. Turn off all lights
+        Each light turns on, captures, then turns off before the next.
         """
         async with self._lock:
             if self._state.is_running:
@@ -66,7 +66,7 @@ class BatchCaptureService:
                 is_running=True,
                 should_cancel=False,
                 current_step=0,
-                total_steps=8,
+                total_steps=9,  # Top Light + 8 Side Lights
                 captures=[],
                 errors=[],
                 started_at=datetime.now(),
@@ -84,33 +84,33 @@ class BatchCaptureService:
             await self._set_all_lights_off()
             await asyncio.sleep(0.5)
             
-            # Turn on Top Light (stays on throughout)
-            await self._set_light(self.TOP_LIGHT_ID, on=True, brightness=100)
-            logger.info("Top Light ON")
+            # Build list of all lights to capture: Top Light (id=0) + Side Lights (id=1-8)
+            all_lights = [
+                {"id": self.TOP_LIGHT_ID, "name": "Top Light", "suffix": "top"},
+            ] + [
+                {"id": side_id, "name": f"Side {side_id} Light", "suffix": f"side_{side_id}"}
+                for side_id in self.SIDE_LIGHT_IDS
+            ]
             
-            # Process each side light
-            for step, side_light_id in enumerate(self.SIDE_LIGHT_IDS, start=1):
+            # Process each light: ON → capture → OFF
+            for step, light_info in enumerate(all_lights, start=1):
                 if self._state.should_cancel:
                     logger.info("Batch capture cancelled by user")
                     break
                 
                 self._state.current_step = step
-                side_light_name = f"Side {side_light_id} Light"
+                light_id = light_info["id"]
+                light_name = light_info["name"]
+                suffix = light_info["suffix"]
                 
-                # Turn off previous side light (if not first)
-                if step > 1:
-                    prev_side_id = self.SIDE_LIGHT_IDS[step - 2]
-                    await self._set_light(prev_side_id, on=False)
-                    logger.info(f"Side {prev_side_id} Light OFF")
-                
-                # Turn on current side light
-                await self._set_light(side_light_id, on=True, brightness=100)
-                logger.info(f"{side_light_name} ON")
+                # Turn on current light
+                await self._set_light(light_id, on=True, brightness=100)
+                logger.info(f"{light_name} ON")
                 
                 # Report progress: waiting for light
                 await self._report_progress(
                     status="waiting_light",
-                    message=f"Waiting {light_stabilize_delay}s for {side_light_name} to stabilize..."
+                    message=f"Waiting {light_stabilize_delay}s for {light_name} to stabilize..."
                 )
                 
                 # Wait for light to stabilize
@@ -122,20 +122,19 @@ class BatchCaptureService:
                 # Report progress: capturing
                 await self._report_progress(
                     status="capturing",
-                    message=f"Capturing with {side_light_name}..."
+                    message=f"Capturing with {light_name}..."
                 )
                 
-                # Capture image
-                suffix = f"side_light_{side_light_id}"
-                filename_prefix = f"{prefix}_{suffix}"
-                
+                # Capture image — suffix goes right before extension
                 try:
-                    result = camera_service.capture_image(folder=folder, prefix=filename_prefix)
+                    result = camera_service.capture_image(folder=folder, prefix=prefix, suffix=suffix)
                     
                     if result.get("success"):
                         capture_info = {
                             "step": step,
-                            "side_light": side_light_id,
+                            "light_id": light_id,
+                            "light_name": light_name,
+                            "suffix": suffix,
                             "filename": result.get("filename"),
                             "file_url": result.get("file_url"),
                             "file_size": result.get("file_size"),
@@ -147,10 +146,10 @@ class BatchCaptureService:
                         # Report progress: processing
                         await self._report_progress(
                             status="processing",
-                            message=f"Captured {side_light_name} ({step}/8)"
+                            message=f"Captured {light_name} ({step}/9)"
                         )
                     else:
-                        error_msg = f"Capture failed for {side_light_name}: {result.get('error')}"
+                        error_msg = f"Capture failed for {light_name}: {result.get('error')}"
                         self._state.errors.append(error_msg)
                         logger.error(error_msg)
                         
@@ -160,9 +159,13 @@ class BatchCaptureService:
                         )
                         
                 except Exception as e:
-                    error_msg = f"Capture exception for {side_light_name}: {str(e)}"
+                    error_msg = f"Capture exception for {light_name}: {str(e)}"
                     self._state.errors.append(error_msg)
                     logger.exception(error_msg)
+                
+                # Turn off current light before moving to next
+                await self._set_light(light_id, on=False)
+                logger.info(f"{light_name} OFF")
                 
                 # Small delay between captures for camera recovery
                 await asyncio.sleep(0.5)
@@ -231,13 +234,22 @@ class BatchCaptureService:
         """Turn off all lights"""
         await light_service.set_all_lights(on=False)
 
-    async def _report_progress(self, status: str, message: str):
+    async def _report_progress(self, status: str, message: str, light_name: str = None):
         """Report progress to callback if registered"""
         if self._state.progress_callback:
+            # Determine current light name
+            if light_name is None:
+                if self._state.current_step == 0:
+                    light_name = "None"
+                elif self._state.current_step == 1:
+                    light_name = "Top Light"
+                else:
+                    light_name = f"Side {self._state.current_step - 1} Light"
+            
             progress = BatchCaptureProgress(
                 current_step=self._state.current_step,
                 total_steps=self._state.total_steps,
-                current_light=f"Side {self._state.current_step} Light" if self._state.current_step > 0 else "None",
+                current_light=light_name,
                 status=status,
                 message=message,
                 captures=[c.get("filename", "") for c in self._state.captures]

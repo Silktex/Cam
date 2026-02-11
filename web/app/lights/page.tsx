@@ -13,6 +13,7 @@ export default function LightsPage() {
     esp32Host,
     setLight,
     setAllLights,
+    requestState,
   } = useLightsWebSocket();
 
   const [masterBrightness, setMasterBrightness] = useState(100);
@@ -112,6 +113,14 @@ export default function LightsPage() {
           />
           <span className="text-sm min-w-[40px] text-right">{masterBrightness}%</span>
         </div>
+
+        <button
+          onClick={requestState}
+          className="px-6 py-3 rounded-full font-medium bg-green-600/20 text-green-400 border border-green-500/30
+            hover:bg-green-600/30 transition-all"
+        >
+          ↻ Refresh
+        </button>
 
         <button
           onClick={handleReconnect}

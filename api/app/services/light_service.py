@@ -24,6 +24,8 @@ class LightControllerService:
         self._session: Optional[aiohttp.ClientSession] = None
         self._websocket_clients: Set[WebSocket] = set()
         self._broadcast_lock = asyncio.Lock()
+        self._poll_task: Optional[asyncio.Task] = None
+        self._poll_interval: float = 2.0  # Poll every 2 seconds
         
         # Initialize light states from config
         names = settings.light_names_list
@@ -54,6 +56,13 @@ class LightControllerService:
                     self.connected = False
                     logger.warning(f"ESP32 returned status {resp.status}")
             
+            # Fetch initial light states from ESP32
+            if self.connected:
+                await self._poll_esp32_states()
+            
+            # Start background polling task
+            self._start_polling()
+            
             # Broadcast connection status
             await self._broadcast_state()
             return True
@@ -63,6 +72,74 @@ class LightControllerService:
             logger.info("Running in simulation mode - states tracked locally")
             self.connected = False
             return False
+
+    def _start_polling(self):
+        """Start background polling task."""
+        if self._poll_task is None or self._poll_task.done():
+            self._poll_task = asyncio.create_task(self._poll_loop())
+            logger.info("Started ESP32 state polling task")
+
+    def _stop_polling(self):
+        """Stop background polling task."""
+        if self._poll_task and not self._poll_task.done():
+            self._poll_task.cancel()
+            self._poll_task = None
+            logger.info("Stopped ESP32 state polling task")
+
+    async def _poll_loop(self):
+        """Background task that polls ESP32 for state changes."""
+        while True:
+            try:
+                await asyncio.sleep(self._poll_interval)
+                
+                if self.connected and self._websocket_clients:
+                    # Only poll if connected and there are WebSocket clients
+                    state_changed = await self._poll_esp32_states()
+                    if state_changed:
+                        await self._broadcast_state()
+                        
+            except asyncio.CancelledError:
+                logger.info("Polling task cancelled")
+                break
+            except Exception as e:
+                logger.error(f"Error in polling loop: {e}")
+                await asyncio.sleep(5)  # Wait longer on error
+
+    async def _poll_esp32_states(self) -> bool:
+        """
+        Poll ESP32 for current light states.
+        Returns True if any state changed.
+        """
+        if not self._session or not self.connected:
+            return False
+            
+        state_changed = False
+        names = settings.light_names_list
+        
+        for i, name in enumerate(names):
+            try:
+                encoded_name = quote(name)
+                url = f"http://{settings.ESP32_HOST}/light/{encoded_name}"
+                
+                async with self._session.get(url, timeout=aiohttp.ClientTimeout(total=2)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        # ESPHome returns: {"id": "...", "state": "ON"|"OFF", "brightness": 0-255, ...}
+                        new_on = data.get("state", "OFF") == "ON"
+                        new_brightness = int(data.get("brightness", 255) * 100 / 255)
+                        
+                        if self.lights[i].on != new_on or self.lights[i].brightness != new_brightness:
+                            self.lights[i].on = new_on
+                            self.lights[i].brightness = new_brightness
+                            state_changed = True
+                            logger.debug(f"[POLL] {name}: {'ON' if new_on else 'OFF'} @ {new_brightness}%")
+                            
+            except asyncio.TimeoutError:
+                logger.debug(f"Timeout polling {name}")
+            except Exception as e:
+                logger.debug(f"Error polling {name}: {e}")
+                
+        return state_changed
 
     async def _send_light_command(self, light_name: str, on: bool, brightness: Optional[int] = None) -> bool:
         """Send HTTP command to ESP32."""
@@ -145,7 +222,8 @@ class LightControllerService:
         }
 
     async def disconnect(self):
-        """Close HTTP session."""
+        """Close HTTP session and stop polling."""
+        self._stop_polling()
         if self._session:
             await self._session.close()
             self._session = None
@@ -159,6 +237,10 @@ class LightControllerService:
         async with self._broadcast_lock:
             self._websocket_clients.add(websocket)
             logger.info(f"WebSocket client connected. Total: {len(self._websocket_clients)}")
+        
+        # Force poll ESP32 for fresh state before sending to new client
+        if self.connected:
+            await self._poll_esp32_states()
         
         # Send initial state
         await self._send_to_client(websocket, {
