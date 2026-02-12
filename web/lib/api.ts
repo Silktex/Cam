@@ -1,6 +1,12 @@
 import axios from 'axios';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+// Convert relative URL to full backend URL
+export const getFullUrl = (path: string) => {
+  if (path.startsWith('data:') || path.startsWith('http')) return path;
+  return `${API_BASE_URL}${path}`;
+};
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
@@ -130,6 +136,87 @@ export const updatePBRSelection = (name: string, filename: string, selected: boo
 export const getSettings = () => api.get('/api/batches/settings');
 export const updateMediaPath = (path: string) =>
   api.put('/api/batches/settings/media-path', { path });
+
+// Processing API - Interactive Crop Workflow
+export const getTopImageForCrop = (batchName: string) =>
+  api.get(`/api/processing/crop/top-image/${batchName}`);
+
+export const autoDetectCrop = (batchName: string) =>
+  api.post('/api/processing/crop/auto-detect', { batch_name: batchName });
+
+export const previewManualCrop = (batchName: string, bbox: number[]) =>
+  api.post('/api/processing/crop/preview-manual', { batch_name: batchName, bbox });
+
+export interface CropPoint {
+  x: number;
+  y: number;
+}
+
+export const applyCrop = (
+  batchName: string,
+  cropType: 'manual' | 'auto',
+  options: {
+    bbox?: number[];
+    points?: CropPoint[];
+    rotation?: number;
+  }
+) =>
+  api.post('/api/processing/crop/apply', {
+    batch_name: batchName,
+    crop_type: cropType,
+    bbox: options.bbox,
+    points: options.points,
+    rotation: options.rotation || 0,
+  });
+
+// Legacy crop endpoints (backward compatibility)
+export const manualCrop = (batchName: string, bbox: number[], applyToAll: boolean = true) =>
+  api.post('/api/processing/crop/manual', {
+    batch_name: batchName,
+    bbox,
+    apply_to_all: applyToAll,
+  });
+
+export const autoCrop = (batchName: string, prompt: string = 'fabric sample') =>
+  api.post('/api/processing/crop/auto', {
+    batch_name: batchName,
+    prompt,
+  });
+
+export const getCropPreview = (batchName: string) =>
+  api.get(`/api/processing/crop/preview/${batchName}`);
+
+export const detectColorChecker = (imagePath: string, saveProfile: boolean = false, profileName?: string) =>
+  api.post('/api/processing/colorchecker/detect', {
+    image_path: imagePath,
+    save_profile: saveProfile,
+    profile_name: profileName,
+  });
+
+export const getColorCheckerProfiles = () =>
+  api.get('/api/processing/colorchecker/profiles');
+
+export const calibrateBatch = (batchName: string, profileName?: string, colorcheckerImage?: string) =>
+  api.post('/api/processing/calibrate', {
+    batch_name: batchName,
+    profile_name: profileName,
+    colorchecker_image: colorcheckerImage,
+  });
+
+export const getCalibrationPreview = (batchName: string) =>
+  api.get(`/api/processing/calibrate/preview/${batchName}`);
+
+export const generatePBR = (batchName: string, mode: 'grayscale' | 'colored' | 'both' = 'grayscale') =>
+  api.post('/api/processing/pbr', {
+    batch_name: batchName,
+    mode,
+  });
+
+export const getPBRPreview = (batchName: string) =>
+  api.get(`/api/processing/pbr/preview/${batchName}`);
+
+export const getProcessingStatus = (batchName: string) =>
+  api.get(`/api/processing/status/${batchName}`);
 
 // Batch Types
 export interface BatchSummary {

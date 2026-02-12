@@ -26,7 +26,14 @@ class Settings(BaseSettings):
     # Media storage
     MEDIA_DIR: Path = Path(__file__).parent.parent / "media"
     CAPTURES_DIR: Path = MEDIA_DIR / "captures"
-    
+    COLORCHECKER_DIR: Path = MEDIA_DIR / "colorchecker"
+    MODELS_DIR: Path = Path(__file__).parent.parent / "models"
+
+    # Processing settings
+    USE_GPU: bool = False  # Mac M4 uses MPS, set True for CUDA
+    SAM_MODEL: str = "mobile_sam.pt"
+    DOWNSAMPLE_SCALE: float = 1.0  # 1.0 = full resolution
+
     # Camera settings
     CAMERA_TIMEOUT: int = 10  # seconds
     PREVIEW_FPS: int = 15
@@ -61,6 +68,8 @@ class Settings(BaseSettings):
         # Ensure directories exist
         self.MEDIA_DIR.mkdir(parents=True, exist_ok=True)
         self.CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
+        self.COLORCHECKER_DIR.mkdir(parents=True, exist_ok=True)
+        self.MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 settings = Settings()

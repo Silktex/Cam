@@ -1,18 +1,22 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import {
   ArrowLeft, RefreshCw, Crop, Palette, Layers, ChevronRight,
   CheckCircle2, Clock, Loader2, Camera, Image as ImageIcon,
-  Settings, FolderOpen, AlertCircle, X, Check
+  Settings, FolderOpen, AlertCircle, X, Check, Wand2, Move
 } from 'lucide-react';
 import {
   getBatches, getBatchesSummary, getBatch, syncAllBatches,
   updateBatchCrop, updateBatchCalibration, updateBatchPBR,
-  updatePBRSelection, getMediaUrl,
-  Batch, BatchSummary, BatchImage
+  updatePBRSelection, getMediaUrl, getFullUrl,
+  getTopImageForCrop, autoDetectCrop, previewManualCrop, applyCrop,
+  calibrateBatch, getColorCheckerProfiles,
+  generatePBR,
+  Batch, BatchSummary, BatchImage, CropPoint
 } from '@/lib/api';
+import CropEditor from './components/CropEditor';
 
 type Phase = 'crop' | 'calibration' | 'pbr';
 type Status = 'pending' | 'in_progress' | 'completed';
@@ -23,7 +27,7 @@ const phaseConfig = {
   pbr: { label: 'PBR Generation', icon: Layers, color: 'amber' },
 };
 
-const statusConfig = {
+const statusConfig: Record<Status, { label: string; icon: any; color: string; animate?: boolean }> = {
   pending: { label: 'Pending', icon: Clock, color: 'slate' },
   in_progress: { label: 'In Progress', icon: Loader2, color: 'blue', animate: true },
   completed: { label: 'Completed', icon: CheckCircle2, color: 'green' },
@@ -44,6 +48,37 @@ export default function ProcessingPage() {
   // Filters
   const [filterPhase, setFilterPhase] = useState<Phase | 'all'>('all');
   const [filterStatus, setFilterStatus] = useState<Status | 'all'>('all');
+
+  // Processing modals
+  const [showCropModal, setShowCropModal] = useState(false);
+  const [showCalibrationModal, setShowCalibrationModal] = useState(false);
+  const [showPBRModal, setShowPBRModal] = useState(false);
+
+  // Processing state
+  const [processing, setProcessing] = useState<string | null>(null);
+  const [processResult, setProcessResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  // Interactive Crop State
+  const [cropStep, setCropStep] = useState<'select' | 'preview' | 'applying'>('select');
+  const [topImage, setTopImage] = useState<{
+    thumbnail_url: string;
+    width: number;
+    height: number;
+    filename: string;
+  } | null>(null);
+  const [cropBbox, setCropBbox] = useState<number[]>([0, 0, 0, 0]);
+  const [cropPreview, setCropPreview] = useState<string | null>(null);
+  const [cropMethod, setCropMethod] = useState<'manual' | 'auto'>('manual');
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [drawStart, setDrawStart] = useState({ x: 0, y: 0 });
+  const imageRef = useRef<HTMLImageElement>(null);
+
+  // Calibration settings
+  const [profiles, setProfiles] = useState<{ name: string; path: string }[]>([]);
+  const [selectedProfile, setSelectedProfile] = useState<string>('');
+
+  // PBR settings
+  const [pbrMode, setPbrMode] = useState<'grayscale' | 'colored' | 'both'>('grayscale');
 
   const fetchData = useCallback(async () => {
     try {
@@ -110,6 +145,259 @@ export default function ProcessingPage() {
     }
   };
 
+  // Load calibration profiles
+  const loadProfiles = async () => {
+    try {
+      const res = await getColorCheckerProfiles();
+      setProfiles(res.data.profiles || []);
+    } catch (err) {
+      console.error('Failed to load profiles:', err);
+    }
+  };
+
+  // ─── Interactive Crop Handlers ───
+
+  const openCropModal = async () => {
+    if (!selectedBatch) return;
+    setShowCropModal(true);
+    setCropStep('select');
+    setCropPreview(null);
+    setCropBbox([0, 0, 0, 0]);
+    setProcessing('loading');
+
+    try {
+      const res = await getTopImageForCrop(selectedBatch.name);
+      setTopImage(res.data);
+      // Initialize bbox to center 60% of image
+      const w = res.data.width;
+      const h = res.data.height;
+      setCropBbox([
+        Math.round(w * 0.2),
+        Math.round(h * 0.2),
+        Math.round(w * 0.8),
+        Math.round(h * 0.8),
+      ]);
+    } catch (err: any) {
+      setProcessResult({
+        success: false,
+        message: err.response?.data?.detail || 'Failed to load image',
+      });
+      setShowCropModal(false);
+    } finally {
+      setProcessing(null);
+    }
+  };
+
+  const handleAutoDetect = async () => {
+    if (!selectedBatch) return;
+    setProcessing('auto-detect');
+
+    try {
+      const res = await autoDetectCrop(selectedBatch.name);
+      if (res.data.success) {
+        setCropBbox(res.data.bbox);
+        setCropPreview(res.data.preview_url);
+        setCropMethod('auto');
+        setCropStep('preview');
+      } else {
+        setProcessResult({
+          success: false,
+          message: res.data.error || 'Auto-detect failed. Try manual crop.',
+        });
+      }
+    } catch (err: any) {
+      setProcessResult({
+        success: false,
+        message: err.response?.data?.detail || 'Auto-detect failed',
+      });
+    } finally {
+      setProcessing(null);
+    }
+  };
+
+  const handlePreviewManualCrop = async () => {
+    if (!selectedBatch || cropBbox[2] - cropBbox[0] < 10 || cropBbox[3] - cropBbox[1] < 10) {
+      setProcessResult({
+        success: false,
+        message: 'Please draw a crop region first',
+      });
+      return;
+    }
+    setProcessing('preview');
+
+    try {
+      const res = await previewManualCrop(selectedBatch.name, cropBbox);
+      if (res.data.success) {
+        setCropBbox(res.data.bbox);
+        setCropPreview(res.data.preview_url);
+        setCropMethod('manual');
+        setCropStep('preview');
+      } else {
+        setProcessResult({
+          success: false,
+          message: res.data.error || 'Preview failed',
+        });
+      }
+    } catch (err: any) {
+      setProcessResult({
+        success: false,
+        message: err.response?.data?.detail || 'Preview failed',
+      });
+    } finally {
+      setProcessing(null);
+    }
+  };
+
+  const handleAcceptCrop = async () => {
+    if (!selectedBatch) return;
+    setCropStep('applying');
+    setProcessing('crop');
+
+    try {
+      const res = await applyCrop(selectedBatch.name, cropBbox, cropMethod);
+      if (res.data.success) {
+        setProcessResult({
+          success: true,
+          message: `Cropped ${res.data.processed}/${res.data.total} images (${res.data.crop_type})`,
+        });
+        // Refresh data
+        await fetchData();
+        if (selectedBatch) {
+          await openBatchDetail(selectedBatch);
+        }
+        setShowCropModal(false);
+      } else {
+        setProcessResult({
+          success: false,
+          message: 'Crop failed',
+        });
+        setCropStep('preview');
+      }
+    } catch (err: any) {
+      setProcessResult({
+        success: false,
+        message: err.response?.data?.detail || 'Crop failed',
+      });
+      setCropStep('preview');
+    } finally {
+      setProcessing(null);
+    }
+  };
+
+  const handleRejectCrop = () => {
+    setCropStep('select');
+    setCropPreview(null);
+  };
+
+  // Mouse handlers for drawing crop box
+  const getImageCoords = (e: React.MouseEvent) => {
+    if (!imageRef.current || !topImage) return { x: 0, y: 0 };
+    const rect = imageRef.current.getBoundingClientRect();
+    const scaleX = topImage.width / rect.width;
+    const scaleY = topImage.height / rect.height;
+    return {
+      x: Math.round((e.clientX - rect.left) * scaleX),
+      y: Math.round((e.clientY - rect.top) * scaleY),
+    };
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    const coords = getImageCoords(e);
+    setDrawStart(coords);
+    setIsDrawing(true);
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDrawing) return;
+    const coords = getImageCoords(e);
+    setCropBbox([
+      Math.min(drawStart.x, coords.x),
+      Math.min(drawStart.y, coords.y),
+      Math.max(drawStart.x, coords.x),
+      Math.max(drawStart.y, coords.y),
+    ]);
+  };
+
+  const handleMouseUp = () => {
+    setIsDrawing(false);
+  };
+
+  // Calculate crop box display position
+  const getCropBoxStyle = () => {
+    if (!imageRef.current || !topImage) return {};
+    const rect = imageRef.current.getBoundingClientRect();
+    const scaleX = rect.width / topImage.width;
+    const scaleY = rect.height / topImage.height;
+    return {
+      left: cropBbox[0] * scaleX,
+      top: cropBbox[1] * scaleY,
+      width: (cropBbox[2] - cropBbox[0]) * scaleX,
+      height: (cropBbox[3] - cropBbox[1]) * scaleY,
+    };
+  };
+
+  // ─── Other Processing Handlers ───
+
+  const handleStartCalibration = async () => {
+    if (!selectedBatch) return;
+    setProcessing('calibration');
+    setProcessResult(null);
+
+    try {
+      const res = await calibrateBatch(selectedBatch.name, selectedProfile || undefined);
+      const data = res.data;
+
+      setProcessResult({
+        success: data.success,
+        message: `Calibrated ${data.processed}/${data.total} images`,
+      });
+
+      await fetchData();
+      if (selectedBatch) {
+        await openBatchDetail(selectedBatch);
+      }
+    } catch (err: any) {
+      setProcessResult({
+        success: false,
+        message: err.response?.data?.detail || 'Calibration failed',
+      });
+    } finally {
+      setProcessing(null);
+      setShowCalibrationModal(false);
+    }
+  };
+
+  const handleStartPBR = async () => {
+    if (!selectedBatch) return;
+    setProcessing('pbr');
+    setProcessResult(null);
+
+    try {
+      const res = await generatePBR(selectedBatch.name, pbrMode);
+      const data = res.data;
+
+      setProcessResult({
+        success: data.success,
+        message: data.success
+          ? `Generated ${pbrMode} PBR maps (${data.images_processed} images)`
+          : data.error,
+      });
+
+      await fetchData();
+      if (selectedBatch) {
+        await openBatchDetail(selectedBatch);
+      }
+    } catch (err: any) {
+      setProcessResult({
+        success: false,
+        message: err.response?.data?.detail || 'PBR generation failed',
+      });
+    } finally {
+      setProcessing(null);
+      setShowPBRModal(false);
+    }
+  };
+
   const getStatusBadge = (status: Status) => {
     const config = statusConfig[status];
     const Icon = config.icon;
@@ -131,7 +419,7 @@ export default function ProcessingPage() {
       return batch[statusKey] === filterStatus;
     }
     if (filterPhase !== 'all') {
-      return true; // Show all for this phase
+      return true;
     }
     if (filterStatus !== 'all') {
       return (
@@ -155,14 +443,14 @@ export default function ProcessingPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-cloud flex items-center justify-center">
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-teal-600" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-cloud">
+    <div className="min-h-screen bg-slate-50">
       {/* Header */}
       <header className="bg-white border-b border-slate-200/60 sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
@@ -232,7 +520,6 @@ export default function ProcessingPage() {
                     </span>
                   </div>
 
-                  {/* Progress bar */}
                   <div className="h-2 bg-slate-100 rounded-full overflow-hidden mb-3">
                     <div
                       className="h-full bg-teal-500 transition-all"
@@ -388,8 +675,223 @@ export default function ProcessingPage() {
         </div>
       </main>
 
+      {/* Process Result Toast */}
+      {processResult && (
+        <div className={`fixed bottom-4 right-4 z-[70] px-6 py-4 rounded-2xl shadow-lg flex items-center gap-3 ${
+          processResult.success ? 'bg-green-600 text-white' : 'bg-red-600 text-white'
+        }`}>
+          {processResult.success ? (
+            <CheckCircle2 className="w-5 h-5" />
+          ) : (
+            <AlertCircle className="w-5 h-5" />
+          )}
+          <span>{processResult.message}</span>
+          <button onClick={() => setProcessResult(null)} className="ml-2 hover:opacity-80">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Interactive Crop Modal with 4-point selection and rotation */}
+      {showCropModal && selectedBatch && topImage && (
+        <div className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-5xl h-[90vh] overflow-hidden flex flex-col">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-800">
+                  Crop Images - {selectedBatch.name}
+                </h2>
+                <p className="text-sm text-slate-500">
+                  Click 4 corners (1→2→3→4) or drag points. Use rotation slider for precise angle.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowCropModal(false)}
+                className="p-2 rounded-lg hover:bg-slate-100 transition-colors"
+                disabled={processing === 'crop'}
+              >
+                <X className="w-5 h-5 text-slate-500" />
+              </button>
+            </div>
+
+            {/* Crop Editor */}
+            <div className="flex-1 overflow-hidden">
+              <CropEditor
+                imageUrl={getFullUrl(topImage.thumbnail_url)}
+                originalWidth={topImage.width}
+                originalHeight={topImage.height}
+                isProcessing={processing === 'crop'}
+                onCancel={() => setShowCropModal(false)}
+                onAutoDetect={async () => {
+                  try {
+                    const res = await autoDetectCrop(selectedBatch.name);
+                    if (res.data.success && res.data.bbox) {
+                      // Convert bbox to 4 points
+                      const [x1, y1, x2, y2] = res.data.bbox;
+                      return {
+                        success: true,
+                        points: [
+                          { x: x1, y: y1 },
+                          { x: x2, y: y1 },
+                          { x: x2, y: y2 },
+                          { x: x1, y: y2 },
+                        ],
+                      };
+                    }
+                    return { success: false, error: res.data.error || 'Auto-detect failed' };
+                  } catch (err: any) {
+                    return { success: false, error: err.message || 'Auto-detect failed' };
+                  }
+                }}
+                onApply={async (data) => {
+                  setProcessing('crop');
+                  try {
+                    const res = await applyCrop(selectedBatch.name, data.method, {
+                      points: data.points,
+                      rotation: data.rotation,
+                    });
+                    if (res.data.success) {
+                      setProcessResult({
+                        success: true,
+                        message: `Cropped ${res.data.processed}/${res.data.total} images (${data.method}${data.rotation !== 0 ? `, rotated ${data.rotation.toFixed(1)}°` : ''})`,
+                      });
+                      await fetchData();
+                      if (selectedBatch) {
+                        await openBatchDetail(selectedBatch);
+                      }
+                      setShowCropModal(false);
+                    } else {
+                      setProcessResult({
+                        success: false,
+                        message: 'Crop failed',
+                      });
+                    }
+                  } catch (err: any) {
+                    setProcessResult({
+                      success: false,
+                      message: err.response?.data?.detail || 'Crop failed',
+                    });
+                  } finally {
+                    setProcessing(null);
+                  }
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Calibration Modal */}
+      {showCalibrationModal && selectedBatch && (
+        <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md p-6">
+            <h3 className="text-lg font-semibold text-slate-800 mb-4">
+              Color Calibration - {selectedBatch.name}
+            </h3>
+
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-slate-700 mb-2">
+                ColorChecker Profile
+              </label>
+              {profiles.length > 0 ? (
+                <select
+                  value={selectedProfile}
+                  onChange={(e) => setSelectedProfile(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+                >
+                  <option value="">Select a profile...</option>
+                  {profiles.map((p) => (
+                    <option key={p.name} value={p.name}>{p.name}</option>
+                  ))}
+                </select>
+              ) : (
+                <p className="text-sm text-slate-500 p-3 bg-slate-50 rounded-lg">
+                  No ColorChecker profiles found. Create one by detecting a ColorChecker in an image first.
+                </p>
+              )}
+            </div>
+
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setShowCalibrationModal(false)}
+                className="px-4 py-2 bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleStartCalibration}
+                disabled={processing !== null || !selectedProfile}
+                className="px-4 py-2 bg-violet-600 text-white rounded-xl hover:bg-violet-700 disabled:opacity-50"
+              >
+                {processing === 'calibration' ? (
+                  <><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Processing...</>
+                ) : (
+                  'Run Calibration'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PBR Modal */}
+      {showPBRModal && selectedBatch && (
+        <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md p-6">
+            <h3 className="text-lg font-semibold text-slate-800 mb-4">
+              PBR Generation - {selectedBatch.name}
+            </h3>
+
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-slate-700 mb-2">Mode</label>
+              <div className="space-y-2">
+                {(['grayscale', 'colored', 'both'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    onClick={() => setPbrMode(mode)}
+                    className={`w-full px-4 py-3 rounded-xl text-left transition-colors ${
+                      pbrMode === mode
+                        ? 'bg-amber-100 text-amber-700 border-2 border-amber-500'
+                        : 'bg-slate-100 text-slate-600 border-2 border-transparent hover:bg-slate-200'
+                    }`}
+                  >
+                    <span className="font-medium capitalize">{mode}</span>
+                    <p className="text-xs mt-1 opacity-70">
+                      {mode === 'grayscale' && 'Faster processing, works well for most materials'}
+                      {mode === 'colored' && 'Preserves color information in albedo map'}
+                      {mode === 'both' && 'Generate both grayscale and colored PBR maps'}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setShowPBRModal(false)}
+                className="px-4 py-2 bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleStartPBR}
+                disabled={processing !== null}
+                className="px-4 py-2 bg-amber-600 text-white rounded-xl hover:bg-amber-700 disabled:opacity-50"
+              >
+                {processing === 'pbr' ? (
+                  <><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Generating...</>
+                ) : (
+                  'Generate PBR'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Batch Detail Modal */}
-      {selectedBatch && (
+      {selectedBatch && !showCropModal && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
             {/* Modal Header */}
@@ -448,10 +950,10 @@ export default function ProcessingPage() {
                       key={image.id}
                       className="border border-slate-200 rounded-xl overflow-hidden"
                     >
-                      {/* Thumbnail */}
+                      {/* Thumbnail - show cropped_thumbnail after crop is completed */}
                       <div className="aspect-square bg-slate-100 relative">
                         <img
-                          src={getMediaUrl(`${selectedBatch.name}/thumbnail/${image.filename.replace(/\.[^.]+$/, '.jpg')}`)}
+                          src={`${getMediaUrl(`${selectedBatch.name}/${selectedBatch.crop_status === 'completed' ? 'cropped_thumbnail' : 'thumbnail'}/${image.filename.replace(/\.[^.]+$/, '.jpg')}`)}?t=${selectedBatch.crop_completed_at || ''}`}
                           alt={image.filename}
                           className="w-full h-full object-cover"
                           onError={(e) => {
@@ -514,26 +1016,27 @@ export default function ProcessingPage() {
             {/* Action Buttons */}
             <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex justify-between">
               <div className="flex gap-2">
-                <button
-                  disabled
-                  className="px-4 py-2 bg-slate-200 text-slate-500 rounded-xl cursor-not-allowed"
-                  title="Coming soon"
+                <Link
+                  href={`/processing/crop/${selectedBatch.name}`}
+                  className="px-4 py-2 bg-teal-600 text-white rounded-xl hover:bg-teal-700 transition-colors inline-flex items-center"
                 >
-                  <Crop className="w-4 h-4 inline mr-2" />
+                  <Crop className="w-4 h-4 mr-2" />
                   Start Cropping
-                </button>
+                </Link>
                 <button
-                  disabled
-                  className="px-4 py-2 bg-slate-200 text-slate-500 rounded-xl cursor-not-allowed"
-                  title="Coming soon"
+                  onClick={() => { loadProfiles(); setShowCalibrationModal(true); }}
+                  disabled={processing !== null || selectedBatch?.crop_status !== 'completed'}
+                  className="px-4 py-2 bg-violet-600 text-white rounded-xl hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  title={selectedBatch?.crop_status !== 'completed' ? 'Complete cropping first' : ''}
                 >
                   <Palette className="w-4 h-4 inline mr-2" />
                   Run Calibration
                 </button>
                 <button
-                  disabled
-                  className="px-4 py-2 bg-slate-200 text-slate-500 rounded-xl cursor-not-allowed"
-                  title="Coming soon"
+                  onClick={() => setShowPBRModal(true)}
+                  disabled={processing !== null || selectedBatch?.crop_status !== 'completed'}
+                  className="px-4 py-2 bg-amber-600 text-white rounded-xl hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  title={selectedBatch?.crop_status !== 'completed' ? 'Complete cropping first' : ''}
                 >
                   <Layers className="w-4 h-4 inline mr-2" />
                   Generate PBR

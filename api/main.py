@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
-from app.routers import health, camera, capture, liveview, websocket, lights, lights_ws, batch_capture, batches
+from app.routers import health, camera, capture, liveview, websocket, lights, lights_ws, batch_capture, batches, processing
 from app.services.camera_service import camera_service
 from app.services.light_service import light_service
 
@@ -85,6 +85,7 @@ app.include_router(lights.router, prefix="/api/lights", tags=["Lights"])
 app.include_router(lights_ws.router, prefix="/ws", tags=["Lights WebSocket"])
 app.include_router(batch_capture.router, prefix="/api/batch", tags=["Batch Capture"])
 app.include_router(batches.router, prefix="/api/batches", tags=["Batches"])
+app.include_router(processing.router, prefix="/api/processing", tags=["Processing"])
 
 
 @app.get("/")
