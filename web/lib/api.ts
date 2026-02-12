@@ -109,3 +109,72 @@ export interface FolderInfo {
   file_count: number;
   total_size: number;
 }
+
+// Batches / Processing
+export const syncAllBatches = () => api.post('/api/batches/sync');
+export const syncBatch = (name: string) => api.post(`/api/batches/sync/${name}`);
+export const getBatches = () => api.get('/api/batches/');
+export const getBatchesSummary = () => api.get('/api/batches/summary');
+export const getBatch = (name: string) => api.get(`/api/batches/${name}`);
+export const getBatchImages = (name: string) => api.get(`/api/batches/${name}/images`);
+export const getBatchesByStatus = (phase: string, status: string) =>
+  api.get(`/api/batches/status/${phase}/${status}`);
+export const updateBatchCrop = (name: string, status: string, cropType?: string) =>
+  api.put(`/api/batches/${name}/crop`, { status, crop_type: cropType });
+export const updateBatchCalibration = (name: string, status: string) =>
+  api.put(`/api/batches/${name}/calibration`, { status });
+export const updateBatchPBR = (name: string, status: string, pbrMode?: string) =>
+  api.put(`/api/batches/${name}/pbr`, { status, pbr_mode: pbrMode });
+export const updatePBRSelection = (name: string, filename: string, selected: boolean) =>
+  api.put(`/api/batches/${name}/pbr-selection`, { filename, selected });
+export const getSettings = () => api.get('/api/batches/settings');
+export const updateMediaPath = (path: string) =>
+  api.put('/api/batches/settings/media-path', { path });
+
+// Batch Types
+export interface BatchSummary {
+  total_batches: number;
+  crop: { pending: number; in_progress: number; completed: number };
+  calibration: { pending: number; in_progress: number; completed: number };
+  pbr: { pending: number; in_progress: number; completed: number };
+}
+
+export interface Batch {
+  id: number;
+  name: string;
+  folder_path: string;
+  created_at: string;
+  image_count: number;
+  crop_status: 'pending' | 'in_progress' | 'completed';
+  crop_type: 'manual' | 'auto' | null;
+  crop_completed_at: string | null;
+  calibration_status: 'pending' | 'in_progress' | 'completed';
+  calibration_completed_at: string | null;
+  pbr_status: 'pending' | 'in_progress' | 'completed';
+  pbr_mode: 'grayscale' | 'colored' | 'both' | null;
+  pbr_completed_at: string | null;
+  synced_at: string;
+  notes: string | null;
+}
+
+export interface BatchImage {
+  id: number;
+  batch_id: number;
+  filename: string;
+  position: string;
+  camera: string;
+  lens: string;
+  resolution_w: number;
+  resolution_h: number;
+  iso: number;
+  aperture: string;
+  shutter: string;
+  focal_length: string;
+  captured_at: string;
+  file_size: number;
+  is_cropped: number;
+  is_calibrated: number;
+  pbr_selected: number;
+  pbr_grayscale_done: number;
+  pbr_colored_done: number;
+}
