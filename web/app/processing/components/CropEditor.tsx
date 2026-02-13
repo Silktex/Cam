@@ -47,6 +47,7 @@ export default function CropEditor({
   const [dragStart, setDragStart] = useState<Point | null>(null);
   const [scale, setScale] = useState(1);
   const [method, setMethod] = useState<'manual' | 'auto'>('manual');
+  const [squareSize, setSquareSize] = useState(2048);
 
   // Processing state
   const [detecting, setDetecting] = useState(false);
@@ -431,22 +432,17 @@ export default function CropEditor({
 
     const centerX = points.reduce((sum, p) => sum + p.x, 0) / 4;
     const centerY = points.reduce((sum, p) => sum + p.y, 0) / 4;
+    const half = squareSize / 2;
 
-    const topWidth = Math.sqrt(Math.pow(points[1].x - points[0].x, 2) + Math.pow(points[1].y - points[0].y, 2));
-    const bottomWidth = Math.sqrt(Math.pow(points[2].x - points[3].x, 2) + Math.pow(points[2].y - points[3].y, 2));
-    const leftHeight = Math.sqrt(Math.pow(points[3].x - points[0].x, 2) + Math.pow(points[3].y - points[0].y, 2));
-    const rightHeight = Math.sqrt(Math.pow(points[2].x - points[1].x, 2) + Math.pow(points[2].y - points[1].y, 2));
-
-    const avgWidth = (topWidth + bottomWidth) / 2;
-    const avgHeight = (leftHeight + rightHeight) / 2;
-    const size = (avgWidth + avgHeight) / 2;
-    const half = size / 2;
+    // Clamp center so the square stays within image bounds
+    const clampedCX = Math.max(half, Math.min(originalWidth - half, centerX));
+    const clampedCY = Math.max(half, Math.min(originalHeight - half, centerY));
 
     setPoints([
-      { x: Math.round(centerX - half), y: Math.round(centerY - half) },
-      { x: Math.round(centerX + half), y: Math.round(centerY - half) },
-      { x: Math.round(centerX + half), y: Math.round(centerY + half) },
-      { x: Math.round(centerX - half), y: Math.round(centerY + half) },
+      { x: Math.round(clampedCX - half), y: Math.round(clampedCY - half) },
+      { x: Math.round(clampedCX + half), y: Math.round(clampedCY - half) },
+      { x: Math.round(clampedCX + half), y: Math.round(clampedCY + half) },
+      { x: Math.round(clampedCX - half), y: Math.round(clampedCY + half) },
     ]);
     setMethod('manual');
   };
@@ -570,13 +566,22 @@ export default function CropEditor({
                 <RectangleHorizontal className="w-4 h-4" />
                 Straighten
               </button>
-              <button
-                onClick={handleSquarify}
-                className="flex items-center justify-center gap-1.5 py-2 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition-colors text-sm"
-              >
-                <Square className="w-4 h-4" />
-                Square
-              </button>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="number"
+                  value={squareSize}
+                  onChange={(e) => setSquareSize(Math.max(256, Math.min(8192, parseInt(e.target.value) || 2048)))}
+                  className="w-16 px-2 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-700 text-center"
+                  title="Square size in pixels"
+                />
+                <button
+                  onClick={handleSquarify}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition-colors text-sm"
+                >
+                  <Square className="w-4 h-4" />
+                  Square
+                </button>
+              </div>
             </div>
           </div>
         </div>
