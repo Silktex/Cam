@@ -181,11 +181,9 @@ class CalibrationService:
         masks = np.array(data.swatch_masks).reshape(4, 6, 4)
 
         if axis == 'horizontal':
-            # Flip rows 0 and 2 horizontally (specific to ColorChecker layout)
-            swatches[0] = swatches[0][::-1]
-            swatches[2] = swatches[2][::-1]
-            masks[0] = masks[0][::-1]
-            masks[2] = masks[2][::-1]
+            # Flip ALL columns (standard horizontal flip)
+            swatches = swatches[:, ::-1, :]
+            masks = masks[:, ::-1, :]
             new_flip_h = not data.flip_h
             new_flip_v = data.flip_v
         else:  # vertical
@@ -450,28 +448,46 @@ class CalibrationService:
         """
         Apply color calibration to a single image.
 
+        All operations are done in LINEAR RGB space for correctness:
+        - Detected swatches from camera are gamma-encoded sRGB, need decoding
+        - Reference swatches from XYZ_to_RGB are already linear
+        - Image needs gamma decoding before correction, re-encoding after
+
         Args:
             image: Input image (RGB, float 0-1 or uint8/uint16)
             data: ColorCheckerData with calibration info
 
         Returns:
-            Color-corrected image
+            Color-corrected image (gamma-encoded sRGB)
         """
         if not COLOUR_AVAILABLE:
             raise ImportError("colour-science library not installed")
 
-        # Normalize to float 0-1 if needed
+        # 1. Normalize image to float 0-1 if needed
         if image.dtype == np.uint8:
             image = image.astype(np.float32) / 255.0
         elif image.dtype == np.uint16:
             image = image.astype(np.float32) / 65535.0
 
-        # Apply color correction using colour-science
-        corrected = colour.colour_correction(
-            image,
-            data.detected_swatches,
-            data.reference_swatches
+        # 2. Decode image from gamma sRGB to linear RGB
+        image_linear = colour.cctf_decoding(image, 'sRGB')
+
+        # 3. Decode detected swatches from gamma sRGB to linear RGB
+        # (detected swatches are sampled from gamma-encoded image)
+        detected_linear = colour.cctf_decoding(data.detected_swatches, 'sRGB')
+
+        # 4. Reference swatches are already linear (from XYZ_to_RGB)
+        reference_linear = data.reference_swatches
+
+        # 5. Apply color correction in linear space
+        corrected_linear = colour.colour_correction(
+            image_linear,
+            detected_linear,
+            reference_linear
         )
+
+        # 6. Encode back to gamma sRGB
+        corrected = colour.cctf_encoding(corrected_linear, 'sRGB')
 
         return corrected
 
@@ -523,11 +539,11 @@ class CalibrationService:
                 # Load image
                 image = colour.io.read_image(str(image_path))
 
-                # Apply calibration
+                # Apply calibration (returns gamma-encoded sRGB)
                 corrected = self.calibrate_image(image, checker_data)
 
-                # Save as 16-bit PNG
-                corrected_clipped = np.clip(colour.cctf_encoding(corrected), 0, 1)
+                # Save as 16-bit PNG (already gamma-encoded, just clip and scale)
+                corrected_clipped = np.clip(corrected, 0, 1)
                 corrected_16bit = (corrected_clipped * 65535).astype(np.uint16)
 
                 output_path = output_folder / f"{image_path.stem}_calibrated.png"
@@ -595,17 +611,15 @@ class CalibrationService:
         """Get the current cached detection."""
         return self._current_detection
 
-    def _get_reference_checker(self, flip_h: bool = True) -> 'ColourChecker':
+    def _get_reference_checker(self) -> 'ColourChecker':
         """
-        Get reference ColorChecker with optional horizontal flip.
-        Default flip matches common camera orientation.
+        Get reference ColorChecker (standard orientation).
+
+        The reference swatches should never be flipped - they represent
+        the standard. Instead, detected swatches should be flipped/rotated
+        to match the reference orientation.
         """
-        checker = REFERENCE_COLOUR_CHECKER
-
-        if flip_h:
-            checker = self._flip_colour_checker(checker, 'horizontal')
-
-        return checker
+        return REFERENCE_COLOUR_CHECKER
 
     def _flip_colour_checker(self, colour_checker: 'ColourChecker', flip_axis: str) -> 'ColourChecker':
         """
@@ -625,11 +639,9 @@ class CalibrationService:
 
         # Flip both names and values
         if flip_axis == 'horizontal':
-            # Flip specific rows for ColorChecker24 layout
-            name_array[0] = name_array[0][::-1]
-            name_array[2] = name_array[2][::-1]
-            swatch_array[0] = swatch_array[0][::-1]
-            swatch_array[2] = swatch_array[2][::-1]
+            # Flip ALL columns (standard horizontal flip)
+            name_array = name_array[:, ::-1]
+            swatch_array = swatch_array[:, ::-1, :]
         elif flip_axis == 'vertical':
             swatch_array = np.flipud(swatch_array)
             name_array = np.flipud(name_array)
