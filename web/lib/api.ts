@@ -218,6 +218,40 @@ export const getPBRPreview = (batchName: string) =>
 export const getProcessingStatus = (batchName: string) =>
   api.get(`/api/processing/status/${batchName}`);
 
+// ColorChecker API - Detection and Calibration Workflow
+export const captureColorChecker = () =>
+  api.post('/api/colorchecker/capture');
+
+export const detectColorCheckerSwatches = (imagePath: string) =>
+  api.post('/api/colorchecker/detect', { image_path: imagePath });
+
+export const flipColorChecker = (detectionId: string, axis: string) =>
+  api.post('/api/colorchecker/flip', { detection_id: detectionId, axis });
+
+export const rotateColorChecker = (detectionId: string, degrees: number) =>
+  api.post('/api/colorchecker/rotate', { detection_id: detectionId, degrees });
+
+export const getColorCheckerOverlay = (detectionId: string) =>
+  `${API_BASE_URL}/api/colorchecker/overlay/${detectionId}`;
+
+export const saveColorCheckerProfile = (detectionId: string, profileName: string) =>
+  api.post('/api/colorchecker/save', { detection_id: detectionId, profile_name: profileName });
+
+export const listColorCheckerProfiles = () =>
+  api.get('/api/colorchecker/profiles');
+
+export const getColorCheckerProfile = (name: string) =>
+  api.get(`/api/colorchecker/profiles/${name}`);
+
+export const deleteColorCheckerProfile = (name: string) =>
+  api.delete(`/api/colorchecker/profiles/${name}`);
+
+export const getReferenceSwatches = () =>
+  api.get('/api/colorchecker/reference-swatches');
+
+export const getDetectedSwatches = (detectionId: string) =>
+  api.get(`/api/colorchecker/detected-swatches/${detectionId}`);
+
 // Batch Types
 export interface BatchSummary {
   total_batches: number;

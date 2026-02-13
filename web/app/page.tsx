@@ -1,14 +1,18 @@
 'use client';
 
+import { useState } from 'react';
 import { HealthMonitor } from '@/components/health-monitor';
 import { CameraControl } from '@/components/camera-control';
 import { CapturePanel } from '@/components/capture-panel';
+import { ColorCheckerPanel } from '@/components/color-checker-panel';
 import { StreamViewer } from '@/components/stream-viewer';
 import { CameraSettings } from '@/components/camera-settings';
-import { Camera, Images, Lightbulb, Layers, Workflow } from 'lucide-react';
+import { Camera, Images, Lightbulb, Layers, Workflow, Palette } from 'lucide-react';
 import Link from 'next/link';
 
 export default function Home() {
+  const [activeTab, setActiveTab] = useState<'capture' | 'colorchecker'>('capture');
+
   return (
     <div className="min-h-screen bg-cloud">
       {/* Header */}
@@ -69,9 +73,36 @@ export default function Home() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left Column - Capture */}
-          <div className="space-y-6">
-            <CapturePanel />
+          {/* Left Column - Capture / Color Checker */}
+          <div className="space-y-4">
+            {/* Tabs */}
+            <div className="flex bg-slate-100 rounded-xl p-1">
+              <button
+                onClick={() => setActiveTab('capture')}
+                className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  activeTab === 'capture'
+                    ? 'bg-white text-slate-800 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-800'
+                }`}
+              >
+                <Camera className="w-4 h-4" />
+                Capture
+              </button>
+              <button
+                onClick={() => setActiveTab('colorchecker')}
+                className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  activeTab === 'colorchecker'
+                    ? 'bg-white text-slate-800 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-800'
+                }`}
+              >
+                <Palette className="w-4 h-4" />
+                Color Checker
+              </button>
+            </div>
+
+            {/* Panel Content */}
+            {activeTab === 'capture' ? <CapturePanel /> : <ColorCheckerPanel />}
           </div>
 
           {/* Middle + Right Column - Stream & Settings */}

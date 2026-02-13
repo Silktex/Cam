@@ -254,7 +254,7 @@ export default function ProcessingPage() {
     setProcessing('crop');
 
     try {
-      const res = await applyCrop(selectedBatch.name, cropBbox, cropMethod);
+      const res = await applyCrop(selectedBatch.name, cropMethod, { bbox: cropBbox });
       if (res.data.success) {
         setProcessResult({
           success: true,

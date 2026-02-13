@@ -134,22 +134,53 @@ async def browse_path(path: str = ""):
             ext = item.suffix.lower()
             is_image = ext in [".jpg", ".jpeg", ".png", ".gif", ".webp", ".tiff", ".tif", ".arw", ".cr2", ".nef", ".dng"]
 
-            # Find thumbnail if available
+            # Find thumbnail if available - prefer cropped_thumbnail over thumbnail
             thumbnail_url = None
             if is_image and path:
-                # Try to find corresponding thumbnail
                 parent_parts = path.split("/")
                 if len(parent_parts) >= 1:
                     session_folder = parent_parts[0]
+                    # Try cropped_thumbnail first (post-crop)
+                    cropped_thumb_path = settings.CAPTURES_DIR / session_folder / "cropped_thumbnail" / f"{item.stem}.jpg"
                     thumb_path = settings.CAPTURES_DIR / session_folder / "thumbnail" / f"{item.stem}.jpg"
-                    if thumb_path.exists():
+                    if cropped_thumb_path.exists():
+                        thumbnail_url = f"/media/captures/{session_folder}/cropped_thumbnail/{item.stem}.jpg"
+                    elif thumb_path.exists():
                         thumbnail_url = f"/media/captures/{session_folder}/thumbnail/{item.stem}.jpg"
+
+            # For display URL, prefer web-displayable formats (jpg/png)
+            # For download URL, prefer high-quality (tiff/raw)
+            display_url = f"/media/captures/{rel_path}"
+            download_url = f"/media/captures/{rel_path}"
+
+            if is_image and path:
+                parent_parts = path.split("/")
+                if len(parent_parts) >= 1:
+                    session_folder = parent_parts[0]
+
+                    # Display URL: prefer cropped_thumbnail (jpg) > full_webview (jpg)
+                    cropped_thumb = settings.CAPTURES_DIR / session_folder / "cropped_thumbnail" / f"{item.stem}.jpg"
+                    full_webview = settings.CAPTURES_DIR / session_folder / "full_webview" / f"{item.stem}.jpg"
+
+                    if cropped_thumb.exists():
+                        display_url = f"/media/captures/{session_folder}/cropped_thumbnail/{item.stem}.jpg"
+                    elif full_webview.exists():
+                        display_url = f"/media/captures/{session_folder}/full_webview/{item.stem}.jpg"
+
+                    # Download URL: prefer cropped (tiff) > original
+                    cropped_dir = settings.CAPTURES_DIR / session_folder / "cropped"
+                    for ext in ['.tiff', '.jpg', '.jpeg', '.png']:
+                        cropped_path = cropped_dir / f"{item.stem}{ext}"
+                        if cropped_path.exists():
+                            download_url = f"/media/captures/{session_folder}/cropped/{item.stem}{ext}"
+                            break
 
             items.append({
                 "name": item.name,
                 "type": "file",
                 "path": rel_path,
-                "url": f"/media/captures/{rel_path}",
+                "url": display_url,
+                "download_url": download_url,
                 "thumbnail_url": thumbnail_url,
                 "size": item.stat().st_size,
                 "modified": item.stat().st_mtime,

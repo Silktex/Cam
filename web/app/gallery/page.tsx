@@ -19,6 +19,7 @@ interface GalleryItem {
   type: 'folder' | 'file';
   path: string;
   url?: string;
+  download_url?: string;
   thumbnail_url?: string;
   size?: number;
   modified: number;
@@ -107,14 +108,10 @@ export default function GalleryPage() {
   };
 
   const getImageUrl = (item: GalleryItem, preferWebview = true) => {
-    if (!item.path) return item.url || '';
-
-    const parts = item.path.split('/');
-    if (parts.length >= 2 && preferWebview) {
-      const sessionFolder = parts[0];
-      const filename = parts[parts.length - 1];
-      const stem = filename.replace(/\.[^.]+$/, '');
-      return `${sessionFolder}/full_webview/${stem}.jpg`;
+    // Use item.url which already points to cropped version when available (from backend)
+    if (item.url) {
+      // item.url is like "/media/captures/batch/cropped/file.tiff" - strip prefix
+      return item.url.replace('/media/captures/', '');
     }
     return item.path;
   };
@@ -387,10 +384,10 @@ export default function GalleryPage() {
                 <RotateCcw className="w-5 h-5" />
               </button>
               <a
-                href={getMediaUrl(viewerImage.path)}
+                href={getMediaUrl(viewerImage.download_url?.replace('/media/captures/', '') || viewerImage.path)}
                 download
                 className="p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors"
-                title="Download Original"
+                title="Download Cropped"
               >
                 <Download className="w-5 h-5" />
               </a>
@@ -456,7 +453,8 @@ export default function GalleryPage() {
                   const target = e.currentTarget;
                   if (!target.dataset.fallback) {
                     target.dataset.fallback = 'true';
-                    target.src = getMediaUrl(viewerImage.path);
+                    // Fallback to original path if cropped version fails
+                    target.src = getMediaUrl(viewerImage.url?.replace('/media/captures/', '') || viewerImage.path);
                   }
                 }}
               />
