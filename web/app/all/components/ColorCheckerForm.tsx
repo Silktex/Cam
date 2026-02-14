@@ -1,10 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   getCameraStatus,
   captureColorChecker,
+  uploadColorChecker,
+  getAvailableCheckerImages,
+  getBatchesWithRaw,
   detectColorCheckerSwatches,
   flipColorChecker,
   rotateColorChecker,
@@ -27,6 +30,9 @@ import {
   Save,
   RefreshCw,
   Eye,
+  Upload,
+  FolderOpen,
+  FileImage,
 } from 'lucide-react';
 
 interface ColorCheckerState {
@@ -72,6 +78,32 @@ export default function ColorCheckerForm() {
   const [overlayKey, setOverlayKey] = useState(0);
   const [showComparison, setShowComparison] = useState(false);
   const [detectedSwatches, setDetectedSwatches] = useState<Swatch[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showServerBrowser, setShowServerBrowser] = useState(false);
+  const [wbSourceBatch, setWbSourceBatch] = useState<string>('');
+
+  const { data: availableImages, refetch: refetchAvailable } = useQuery({
+    queryKey: ['colorchecker', 'available-images'],
+    queryFn: () => getAvailableCheckerImages().then((res) => res.data),
+    enabled: showServerBrowser,
+  });
+
+  const { data: batchesWithRaw } = useQuery({
+    queryKey: ['colorchecker', 'batches-with-raw'],
+    queryFn: () => getBatchesWithRaw().then((res) => res.data),
+  });
+
+  const handleSelectServerImage = (image: { path: string; url: string; name: string }) => {
+    setState((s) => ({
+      ...s,
+      imagePath: image.path,
+      imageUrl: image.url,
+      status: 'idle',
+      detectionId: null,
+      overlayUrl: null,
+    }));
+    setShowServerBrowser(false);
+  };
 
   const { data: cameraStatus } = useQuery({
     queryKey: ['camera', 'status'],
@@ -118,8 +150,35 @@ export default function ColorCheckerForm() {
     },
   });
 
+  const uploadMutation = useMutation({
+    mutationFn: (file: File) => uploadColorChecker(file),
+    onMutate: () => {
+      setState((s) => ({ ...s, status: 'capturing', error: null }));
+    },
+    onSuccess: (res) => {
+      const data = res.data;
+      setState((s) => ({
+        ...s,
+        imagePath: data.image_path,
+        imageUrl: data.image_url,
+        status: 'idle',
+        detectionId: null,
+        overlayUrl: null,
+      }));
+    },
+    onError: (error: any) => {
+      setState((s) => ({
+        ...s,
+        status: 'error',
+        error:
+          error.response?.data?.detail || error.message || 'Upload failed',
+      }));
+    },
+  });
+
   const detectMutation = useMutation({
-    mutationFn: (imagePath: string) => detectColorCheckerSwatches(imagePath),
+    mutationFn: ({ imagePath, wbBatch }: { imagePath: string; wbBatch?: string }) =>
+      detectColorCheckerSwatches(imagePath, wbBatch || undefined),
     onMutate: () => {
       setState((s) => ({ ...s, status: 'detecting', error: null }));
     },
@@ -226,9 +285,20 @@ export default function ColorCheckerForm() {
     captureMutation.mutate();
   };
 
+  const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    uploadMutation.mutate(file);
+    // Reset so the same file can be re-selected
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
   const handleDetect = () => {
     if (!state.imagePath) return;
-    detectMutation.mutate(state.imagePath);
+    detectMutation.mutate({
+      imagePath: state.imagePath,
+      wbBatch: wbSourceBatch || undefined,
+    });
   };
 
   const handleFlip = (axis: 'horizontal' | 'vertical') => {
@@ -253,6 +323,7 @@ export default function ColorCheckerForm() {
     state.status === 'capturing' ||
     state.status === 'detecting' ||
     state.status === 'saving' ||
+    uploadMutation.isPending ||
     flipMutation.isPending ||
     rotateMutation.isPending;
 
@@ -264,13 +335,15 @@ export default function ColorCheckerForm() {
           <div className="flex flex-col items-center gap-2">
             <Loader2 className="w-8 h-8 animate-spin text-teal-400" />
             <span className="text-sm font-medium text-white">
-              {state.status === 'capturing'
-                ? 'Capturing...'
-                : state.status === 'detecting'
-                  ? 'Detecting swatches...'
-                  : state.status === 'saving'
-                    ? 'Saving profile...'
-                    : 'Processing...'}
+              {uploadMutation.isPending
+                ? 'Uploading...'
+                : state.status === 'capturing'
+                  ? 'Capturing...'
+                  : state.status === 'detecting'
+                    ? 'Detecting swatches...'
+                    : state.status === 'saving'
+                      ? 'Saving profile...'
+                      : 'Processing...'}
             </span>
           </div>
         </div>
@@ -306,7 +379,7 @@ export default function ColorCheckerForm() {
             <div className="absolute inset-0 flex items-center justify-center text-slate-500">
               <div className="text-center">
                 <Camera className="w-10 h-10 mx-auto mb-2 opacity-50" />
-                <p className="text-xs">Capture a Color Checker image</p>
+                <p className="text-xs">Capture or upload a Color Checker image</p>
               </div>
             </div>
           )}
@@ -332,30 +405,114 @@ export default function ColorCheckerForm() {
           </div>
         )}
 
-        {/* Capture Button */}
-        <button
-          onClick={handleCapture}
-          disabled={!isConnected || isProcessing}
-          className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-            !isConnected || isProcessing
-              ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
-              : 'bg-teal-600 text-white hover:bg-teal-500'
-          }`}
-        >
-          <Camera className="w-4 h-4" />
-          Capture Color Checker
-        </button>
-
-        {/* Detect Button */}
-        {state.imagePath && !state.detectionId && (
+        {/* Capture + Upload + Browse Buttons */}
+        <div className="grid grid-cols-3 gap-2">
           <button
-            onClick={handleDetect}
-            disabled={isProcessing}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-teal-600 text-white rounded-lg text-sm font-medium hover:bg-teal-500 transition-colors"
+            onClick={handleCapture}
+            disabled={!isConnected || isProcessing}
+            className={`flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+              !isConnected || isProcessing
+                ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                : 'bg-teal-600 text-white hover:bg-teal-500'
+            }`}
           >
-            <Eye className="w-4 h-4" />
-            Detect Swatches
+            <Camera className="w-4 h-4" />
+            Capture
           </button>
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isProcessing}
+            className={`flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+              isProcessing
+                ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                : 'bg-slate-700 text-white hover:bg-slate-600'
+            }`}
+          >
+            <Upload className="w-4 h-4" />
+            Upload
+          </button>
+          <button
+            onClick={() => {
+              setShowServerBrowser(!showServerBrowser);
+              if (!showServerBrowser) refetchAvailable();
+            }}
+            disabled={isProcessing}
+            className={`flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+              showServerBrowser
+                ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30'
+                : isProcessing
+                  ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                  : 'bg-slate-700 text-white hover:bg-slate-600'
+            }`}
+          >
+            <FolderOpen className="w-4 h-4" />
+            Browse
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/tiff,.jpg,.jpeg,.png,.tiff,.tif,.arw,.cr2,.nef,.dng"
+            onChange={handleUpload}
+            className="hidden"
+          />
+        </div>
+
+        {/* Server Image Browser */}
+        {showServerBrowser && (
+          <div className="bg-slate-800 border border-slate-700 rounded-xl p-2 max-h-48 overflow-y-auto space-y-1">
+            {!availableImages?.images?.length ? (
+              <p className="text-xs text-slate-500 text-center py-2">
+                No images found in colorchecker captures
+              </p>
+            ) : (
+              availableImages.images.map((img: { name: string; path: string; url: string; folder: string; size: number }) => (
+                <button
+                  key={img.path}
+                  onClick={() => handleSelectServerImage(img)}
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs hover:bg-slate-700 transition-colors text-left"
+                >
+                  <FileImage className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                  <span className="text-slate-300 truncate flex-1">{img.name}</span>
+                  <span className="text-slate-500 flex-shrink-0">{img.folder}</span>
+                </button>
+              ))
+            )}
+          </div>
+        )}
+
+        {/* WB Source Batch + Detect Button */}
+        {state.imagePath && !state.detectionId && (
+          <div className="space-y-2">
+            {/* WB Source Batch dropdown */}
+            {batchesWithRaw?.batches?.length > 0 && (
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">
+                  WB Source Batch <span className="text-slate-500">(for WB-matched detection)</span>
+                </label>
+                <select
+                  value={wbSourceBatch}
+                  onChange={(e) => setWbSourceBatch(e.target.value)}
+                  className="w-full px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white focus:border-teal-500 focus:ring-1 focus:ring-teal-500 focus:outline-none"
+                >
+                  <option value="">None (use image as-is)</option>
+                  {batchesWithRaw.batches.map((batch: { name: string; raw_count: number }) => (
+                    <option key={batch.name} value={batch.name}>
+                      {batch.name} ({batch.raw_count} RAW)
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <button
+              onClick={handleDetect}
+              disabled={isProcessing}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-teal-600 text-white rounded-lg text-sm font-medium hover:bg-teal-500 transition-colors"
+            >
+              <Eye className="w-4 h-4" />
+              {wbSourceBatch ? 'Detect (WB-matched)' : 'Detect Swatches'}
+            </button>
+          </div>
         )}
 
         {/* Adjustment Controls */}

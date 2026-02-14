@@ -220,12 +220,36 @@ export const getPBRPreview = (batchName: string) =>
 export const getProcessingStatus = (batchName: string) =>
   api.get(`/api/processing/status/${batchName}`);
 
+// TIFF Re-conversion
+export const reconvertTiff = (path: string, checkerRawPath?: string) =>
+  api.post('/api/processing/reconvert-tiff', {
+    path,
+    ...(checkerRawPath ? { checker_raw_path: checkerRawPath } : {}),
+  });
+
 // ColorChecker API - Detection and Calibration Workflow
+export const getAvailableCheckerImages = () =>
+  api.get('/api/colorchecker/available-images');
+
+export const getBatchesWithRaw = () =>
+  api.get('/api/colorchecker/batches-with-raw');
+
 export const captureColorChecker = () =>
   api.post('/api/colorchecker/capture');
 
-export const detectColorCheckerSwatches = (imagePath: string) =>
-  api.post('/api/colorchecker/detect', { image_path: imagePath });
+export const uploadColorChecker = (file: File) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  return api.post('/api/colorchecker/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+};
+
+export const detectColorCheckerSwatches = (imagePath: string, wbSourceBatch?: string) =>
+  api.post('/api/colorchecker/detect', {
+    image_path: imagePath,
+    ...(wbSourceBatch ? { wb_source_batch: wbSourceBatch } : {}),
+  });
 
 export const flipColorChecker = (detectionId: string, axis: string) =>
   api.post('/api/colorchecker/flip', { detection_id: detectionId, axis });

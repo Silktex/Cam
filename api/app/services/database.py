@@ -245,11 +245,13 @@ def sync_batch(batch_name: str) -> Dict[str, Any]:
         # Scan RAW folder for images
         raw_folder = batch_path / "raw"
         image_count = 0
+        current_raw_filenames = set()
 
         if raw_folder.exists():
             for raw_file in raw_folder.iterdir():
                 if raw_file.suffix.upper() in ['.ARW', '.CR2', '.NEF', '.DNG', '.RAF']:
                     image_count += 1
+                    current_raw_filenames.add(raw_file.name)
                     position = extract_position_from_filename(raw_file.name)
                     exif = extract_exif(raw_file)
 
@@ -296,6 +298,19 @@ def sync_batch(batch_name: str) -> Dict[str, Any]:
                         int(is_cropped), int(is_calibrated),
                         int(pbr_gray_done), int(pbr_color_done)
                     ))
+
+        # Remove stale DB entries for RAW files that no longer exist on disk
+        if current_raw_filenames:
+            existing_rows = cursor.execute(
+                "SELECT id, filename FROM images WHERE batch_id = ?", (batch_id,)
+            ).fetchall()
+            stale_ids = [row[0] for row in existing_rows if row[1] not in current_raw_filenames]
+            if stale_ids:
+                cursor.execute(
+                    f"DELETE FROM images WHERE id IN ({','.join('?' * len(stale_ids))})",
+                    stale_ids
+                )
+                logger.info(f"Removed {len(stale_ids)} stale image entries for batch {batch_name}")
 
         # Update image count
         cursor.execute("UPDATE batches SET image_count = ? WHERE id = ?", (image_count, batch_id))

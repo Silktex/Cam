@@ -31,10 +31,16 @@ class AutoCropRequest(BaseModel):
     crop_size: int = 2048
 
 
+class ReconvertTiffRequest(BaseModel):
+    path: str  # Relative path under captures dir (e.g. "colorchecker/captures")
+    checker_raw_path: Optional[str] = None  # Use this RAW's WB for all conversions
+
+
 class CalibrateRequest(BaseModel):
     batch_name: str
     profile_name: Optional[str] = None  # Use saved profile
     colorchecker_image: Optional[str] = None  # Detect from image
+    checker_raw_path: Optional[str] = None  # RAW path for fixed WB calibration
 
 
 class DetectColorCheckerRequest(BaseModel):
@@ -312,6 +318,85 @@ async def get_crop_preview(batch_name: str):
     return await get_top_image_for_crop(batch_name)
 
 
+# ─── TIFF Re-conversion Endpoint ───
+
+@router.post("/reconvert-tiff")
+async def reconvert_tiff(request: ReconvertTiffRequest):
+    """
+    Re-convert all RAW files to TIFF using standardized linear sRGB settings.
+
+    Accepts a relative path under the captures directory (e.g. "colorchecker/captures").
+    Looks for raw/ subfolder at that path, outputs TIFFs to tiff/ subfolder.
+    Optionally accepts a checker_raw_path to use that file's WB for all conversions.
+    """
+    # Resolve path relative to captures dir — prevent path traversal
+    rel = Path(request.path)
+    if '..' in rel.parts:
+        raise HTTPException(status_code=400, detail="Invalid path")
+    batch_path = settings.CAPTURES_DIR / rel
+
+    if not batch_path.exists() or not batch_path.is_dir():
+        raise HTTPException(status_code=404, detail=f"Folder not found: {request.path}")
+
+    raw_dir = batch_path / "raw"
+    if not raw_dir.exists():
+        raise HTTPException(status_code=404, detail=f"No raw/ folder in {request.path}")
+
+    tiff_dir = batch_path / "tiff"
+    tiff_dir.mkdir(exist_ok=True)
+
+    from scripts.processing.raw_utils import (
+        is_raw_file, extract_wb, load_raw, load_raw_with_fixed_wb, save_tiff
+    )
+
+    # Extract fixed WB if checker RAW path provided
+    fixed_wb = None
+    if request and request.checker_raw_path:
+        checker_path = Path(request.checker_raw_path)
+        if not checker_path.exists():
+            raise HTTPException(status_code=404, detail=f"Checker RAW not found: {request.checker_raw_path}")
+        fixed_wb = extract_wb(checker_path)
+        if not fixed_wb:
+            raise HTTPException(status_code=500, detail=f"Could not extract WB from {request.checker_raw_path}")
+        logger.info(f"Using fixed WB from {checker_path.name}: {fixed_wb}")
+
+    results = {"success": 0, "failed": 0, "total": 0, "files": []}
+
+    for raw_file in sorted(raw_dir.iterdir()):
+        if not is_raw_file(raw_file):
+            continue
+
+        results["total"] += 1
+        tiff_path = tiff_dir / f"{raw_file.stem}.tiff"
+
+        try:
+            if fixed_wb:
+                rgb = load_raw_with_fixed_wb(raw_file, fixed_wb)
+            else:
+                rgb = load_raw(raw_file)
+
+            if rgb is None:
+                raise ValueError("RAW loading returned None")
+
+            if not save_tiff(rgb, tiff_path, compression='lzw'):
+                raise ValueError("TIFF save failed")
+
+            results["success"] += 1
+            results["files"].append({"name": raw_file.name, "status": "ok"})
+            logger.info(f"Re-converted: {raw_file.name} -> {tiff_path.name}")
+
+        except Exception as e:
+            results["failed"] += 1
+            results["files"].append({"name": raw_file.name, "status": "error", "error": str(e)})
+            logger.error(f"Failed to re-convert {raw_file.name}: {e}")
+
+    return {
+        "path": request.path,
+        "fixed_wb": fixed_wb,
+        **results,
+    }
+
+
 # ─── Color Calibration Endpoints ───
 
 @router.post("/colorchecker/detect")
@@ -399,7 +484,6 @@ async def calibrate_batch(request: CalibrateRequest, background_tasks: Backgroun
     try:
         calibration_service = CalibrationService()
 
-        # Get ColorChecker data
         checker_data = None
 
         if request.profile_name:
@@ -432,7 +516,8 @@ async def calibrate_batch(request: CalibrateRequest, background_tasks: Backgroun
 
         results = calibration_service.calibrate_batch(
             batch_path=str(batch_path),
-            checker_data=checker_data
+            checker_data=checker_data,
+            checker_raw_path=request.checker_raw_path,
         )
 
         success_count = sum(1 for r in results if r.success)

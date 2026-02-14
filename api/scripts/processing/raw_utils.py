@@ -51,15 +51,14 @@ def load_raw(path: Union[str, Path]) -> Optional[np.ndarray]:
                 # Bit depth
                 output_bps=16,
 
-                # Color space (raw = sensor native, no conversion)
-                output_color=rawpy.ColorSpace.raw,
+                # Color space (sRGB primaries via camera color matrix)
+                output_color=rawpy.ColorSpace.sRGB,
 
                 # White balance
                 use_camera_wb=True,
 
-                # Disable auto adjustments (preserve exact sensor data)
+                # Disable auto adjustments
                 no_auto_bright=True,
-                no_auto_scale=True,
 
                 # Linear gamma (no tone curve applied)
                 gamma=(1, 1),
@@ -185,3 +184,70 @@ def convert_folder(
                 results['failed'] += 1
 
     return results
+
+
+def extract_wb(path: Union[str, Path]) -> Optional[list]:
+    """
+    Extract camera white balance multipliers from a RAW file.
+
+    Args:
+        path: Path to RAW file
+
+    Returns:
+        List of 4 WB multipliers [R, G, B, G2], or None if failed
+    """
+    try:
+        import rawpy
+    except ImportError:
+        logger.error("rawpy not installed. Run: pip install rawpy")
+        return None
+
+    try:
+        with rawpy.imread(str(path)) as raw:
+            return list(raw.camera_whitebalance)
+    except Exception as e:
+        logger.error(f"Failed to extract WB from {path}: {e}")
+        return None
+
+
+def load_raw_with_fixed_wb(
+    path: Union[str, Path],
+    wb_multipliers: list,
+) -> Optional[np.ndarray]:
+    """
+    Load RAW using specific WB multipliers (for consistent calibration).
+
+    Uses the same settings as load_raw() but with fixed WB instead of camera WB,
+    ensuring identical white balance across checker and subject images.
+
+    Args:
+        path: Path to RAW file
+        wb_multipliers: List of 4 WB multipliers [R, G, B, G2]
+
+    Returns:
+        numpy array (H, W, 3) uint16 RGB, or None if failed
+    """
+    try:
+        import rawpy
+    except ImportError:
+        logger.error("rawpy not installed. Run: pip install rawpy")
+        return None
+
+    try:
+        with rawpy.imread(str(path)) as raw:
+            rgb = raw.postprocess(
+                demosaic_algorithm=rawpy.DemosaicAlgorithm.AHD,
+                output_bps=16,
+                output_color=rawpy.ColorSpace.sRGB,
+                use_camera_wb=False,
+                user_wb=wb_multipliers,
+                no_auto_bright=True,
+                gamma=(1, 1),
+                half_size=False,
+                four_color_rgb=False,
+                fbdd_noise_reduction=rawpy.FBDDNoiseReductionMode.Off,
+            )
+        return rgb
+    except Exception as e:
+        logger.error(f"Failed to load RAW {path} with fixed WB: {e}")
+        return None

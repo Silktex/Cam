@@ -685,28 +685,10 @@ class CropService:
 
     def _load_raw_for_display(self, path: Path) -> Optional[np.ndarray]:
         """
-        Load RAW file with display-ready settings.
-        Uses sRGB color space and proper gamma - matches thumbnail generation.
+        Load RAW file using centralized raw_utils settings.
+        Returns linear sRGB 16-bit — consistent with camera_service TIFF output.
         """
-        try:
-            import rawpy
-        except ImportError:
-            logger.error("rawpy not installed")
-            return None
-
-        try:
-            with rawpy.imread(str(path)) as raw:
-                # Use same settings as thumbnail generation for consistent colors
-                rgb = raw.postprocess(
-                    use_camera_wb=True,
-                    output_bps=16,  # Keep 16-bit for quality
-                    no_auto_bright=True,
-                    # Let rawpy use defaults for color space (sRGB) and gamma
-                )
-            return rgb
-        except Exception as e:
-            logger.error(f"Failed to load RAW {path}: {e}")
-            return None
+        return load_raw(path)
 
     def _save_image(self, img: np.ndarray, path: Path):
         """

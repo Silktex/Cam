@@ -5,9 +5,10 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   Folder, FileImage, ArrowLeft, ChevronRight, Home, X,
-  ZoomIn, ZoomOut, RotateCcw, Download, Loader2, Image as ImageIcon, Trash2
+  ZoomIn, ZoomOut, RotateCcw, Download, Loader2, Image as ImageIcon, Trash2,
+  RefreshCw, CheckCircle2
 } from 'lucide-react';
-import { browsePath, getMediaUrl, deleteFolder, deleteFile } from '@/lib/api';
+import { browsePath, getMediaUrl, deleteFolder, deleteFile, reconvertTiff } from '@/lib/api';
 
 interface BreadcrumbItem {
   name: string;
@@ -59,6 +60,8 @@ function GalleryContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [reconverting, setReconverting] = useState(false);
+  const [reconvertResult, setReconvertResult] = useState<{ success: boolean; message: string } | null>(null);
   const [confirmModal, setConfirmModal] = useState<{
     open: boolean;
     type: 'folder' | 'file';
@@ -230,6 +233,28 @@ function GalleryContent() {
     return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
   };
 
+  const handleReconvertTiff = async () => {
+    if (!currentPath) return;
+    setReconverting(true);
+    setReconvertResult(null);
+    try {
+      const res = await reconvertTiff(currentPath);
+      const d = res.data;
+      setReconvertResult({
+        success: d.success > 0,
+        message: `Reconverted ${d.success}/${d.total} files${d.failed > 0 ? ` (${d.failed} failed)` : ''}`,
+      });
+      fetchData();
+    } catch (err: any) {
+      setReconvertResult({
+        success: false,
+        message: err.response?.data?.detail || 'Reconvert failed',
+      });
+    } finally {
+      setReconverting(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-cloud flex items-center justify-center">
@@ -264,6 +289,9 @@ function GalleryContent() {
   ) || [];
   const imageItems = visibleItems.filter(i => i.type === 'file' && i.is_image);
 
+  // Show reconvert button when inside a batch folder (has raw/ subfolder)
+  const hasRawFolder = data?.items.some(i => i.type === 'folder' && i.name === 'raw') || false;
+
   return (
     <div className="min-h-screen bg-cloud">
       {/* Header */}
@@ -283,6 +311,31 @@ function GalleryContent() {
                   {visibleItems.filter(i => i.type === 'folder').length} folders, {visibleItems.filter(i => i.type === 'file').length} files
                 </p>
               </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {hasRawFolder && (
+                <>
+                  <button
+                    onClick={handleReconvertTiff}
+                    disabled={reconverting}
+                    className="px-4 py-2 bg-orange-600 text-white rounded-xl hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors inline-flex items-center gap-2 text-sm font-medium"
+                    title="Re-convert all RAW files to linear sRGB TIFFs"
+                  >
+                    {reconverting ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="w-4 h-4" />
+                    )}
+                    Reconvert TIFFs
+                  </button>
+                  {reconvertResult && (
+                    <span className={`text-sm ${reconvertResult.success ? 'text-green-600' : 'text-red-600'} inline-flex items-center gap-1`}>
+                      {reconvertResult.success ? <CheckCircle2 className="w-4 h-4" /> : null}
+                      {reconvertResult.message}
+                    </span>
+                  )}
+                </>
+              )}
             </div>
           </div>
 

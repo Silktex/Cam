@@ -541,7 +541,8 @@ class CameraService:
                         use_camera_wb=True,
                         output_bps=16,
                         no_auto_bright=True,
-                        output_color=rawpy.ColorSpace.Adobe,
+                        output_color=rawpy.ColorSpace.sRGB,
+                        gamma=(1, 1),  # Linear output — gamma applied later by calibration
                     )
                     tiff_filename = f"{stem}.tiff"
                     tiff_path = tiff_dir / tiff_filename
