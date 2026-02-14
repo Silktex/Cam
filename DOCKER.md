@@ -3,7 +3,6 @@
 ## Quick Start
 
 ```bash
-cd camera_system
 docker compose up --build
 ```
 

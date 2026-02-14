@@ -87,7 +87,7 @@ COPY --from=web-builder /build/web/public /app/web/public
 RUN mkdir -p /app/api/media /app/api/data /app/api/models
 
 # Copy entrypoint
-COPY camera_system/entrypoint.sh /app/entrypoint.sh
+COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
 EXPOSE 3000 8000
