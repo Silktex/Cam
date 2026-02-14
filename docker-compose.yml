@@ -9,8 +9,8 @@ services:
       - "3000:3000"
       - "8000:8000"
     volumes:
-      - /home/abhinav/camera-images:/app/api/media
-      - /home/abhinav/camera-data:/app/api/data
+      - ${MEDIA_PATH:-./camera-images}:/app/api/media
+      - ${DATA_PATH:-./camera-data}:/app/api/data
     environment:
       - DEBUG=false
       - ESP32_HOST=192.168.0.44
