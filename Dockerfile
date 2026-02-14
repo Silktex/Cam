@@ -81,8 +81,6 @@ COPY api/ /app/api/
 COPY --from=web-builder /build/web/.next /app/web/.next
 COPY --from=web-builder /build/web/node_modules /app/web/node_modules
 COPY --from=web-builder /build/web/package.json /app/web/package.json
-COPY --from=web-builder /build/web/public /app/web/public
-
 # Create persistent data directories
 RUN mkdir -p /app/api/media /app/api/data /app/api/models
 

@@ -9,8 +9,8 @@ services:
       - "3000:3000"
       - "8000:8000"
     volumes:
-      - media-data:/app/api/media
-      - api-data:/app/api/data
+      - /home/abhinav/camera-images:/app/api/media
+      - /home/abhinav/camera-data:/app/api/data
     environment:
       - DEBUG=false
       - ESP32_HOST=192.168.0.44
@@ -20,6 +20,3 @@ services:
     privileged: true
     restart: unless-stopped
 
-volumes:
-  media-data:
-  api-data:
