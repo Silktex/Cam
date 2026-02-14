@@ -411,10 +411,13 @@ export default function CropPage() {
   };
 
   // Actions
+  // Crop size for auto-detect
+  const [cropSize, setCropSize] = useState(2048);
+
   const handleAutoDetect = async () => {
     setProcessing('auto');
     try {
-      const res = await autoDetectCrop(batchName);
+      const res = await autoDetectCrop(batchName, cropSize);
       if (res.data.success && res.data.bbox) {
         const [x1, y1, x2, y2] = res.data.bbox;
         setPoints([
@@ -772,6 +775,19 @@ export default function CropPage() {
         <div className="p-4 border-b border-slate-700">
           <div className="text-sm font-medium text-slate-300 mb-3">Actions</div>
           <div className="space-y-2">
+            {/* Crop size selector for auto-detect */}
+            <div className="flex items-center gap-2 mb-1">
+              <label className="text-xs text-slate-400">Crop Size:</label>
+              <select
+                value={cropSize}
+                onChange={(e) => setCropSize(parseInt(e.target.value))}
+                className="flex-1 px-2 py-1.5 text-sm bg-slate-700 border border-slate-600 rounded-lg text-white"
+              >
+                <option value={2048}>2048 × 2048</option>
+                <option value={4096}>4096 × 4096</option>
+                <option value={1024}>1024 × 1024</option>
+              </select>
+            </div>
             <button
               onClick={handleAutoDetect}
               disabled={processing !== null}
@@ -782,7 +798,7 @@ export default function CropPage() {
               ) : (
                 <Wand2 className="w-4 h-4" />
               )}
-              Auto Detect
+              Auto Detect ({cropSize}px)
             </button>
             <button
               onClick={handleReset}

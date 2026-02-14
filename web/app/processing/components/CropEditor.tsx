@@ -17,7 +17,7 @@ interface CropEditorProps {
   originalHeight: number;
   isProcessing: boolean;
   onCancel: () => void;
-  onAutoDetect: () => Promise<{ success: boolean; points?: Point[]; error?: string }>;
+  onAutoDetect: (cropSize: number) => Promise<{ success: boolean; points?: Point[]; error?: string }>;
   onApply: (data: { points: Point[]; method: 'manual' | 'auto'; rotation: number }) => Promise<void>;
 }
 
@@ -374,7 +374,7 @@ export default function CropEditor({
     setDetecting(true);
     setError(null);
     try {
-      const result = await onAutoDetect();
+      const result = await onAutoDetect(squareSize);
       if (result.success && result.points) {
         setPoints(result.points);
         setMethod('auto');

@@ -275,12 +275,13 @@ class CalibrationService:
         self._current_detection = new_data
         return new_data
 
-    def generate_overlay_image(self, data: ColorCheckerData) -> bytes:
+    def generate_overlay_image(self, data: ColorCheckerData, show_colors: bool = True) -> bytes:
         """
-        Generate PNG image with swatch boxes overlaid on checker image.
+        Generate PNG image with swatch boxes and detected colors overlaid on checker image.
 
         Args:
             data: ColorCheckerData from detection
+            show_colors: If True, show detected color squares next to each swatch
 
         Returns:
             PNG image bytes
@@ -296,16 +297,42 @@ class CalibrationService:
         if len(img.shape) == 3:
             img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
 
-        # Draw swatch boxes with labels
+        # Get detected swatch colors (convert to 8-bit BGR for OpenCV)
+        detected_colors = data.detected_swatches
+        if detected_colors.max() <= 1.0:
+            detected_colors = (detected_colors * 255).astype(np.uint8)
+        else:
+            detected_colors = detected_colors.astype(np.uint8)
+
+        # Draw swatch boxes with labels and detected colors
         swatch_labels = list('ABCDEFGHIJKLMNOPQRSTUVWX')
 
         for i, mask in enumerate(data.swatch_masks):
             y1, y2, x1, x2 = [int(m) for m in mask]
+            swatch_h = y2 - y1
+            swatch_w = x2 - x1
 
-            # Draw rectangle
+            # Draw rectangle outline
             cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
 
-            # Draw label
+            # Draw detected color square inside the swatch (bottom-right corner)
+            if show_colors and i < len(detected_colors):
+                # Get detected color (RGB) and convert to BGR for OpenCV
+                r, g, b = detected_colors[i]
+                color_bgr = (int(b), int(g), int(r))
+
+                # Draw color square (25% of swatch size, positioned at bottom-right)
+                color_size = max(int(min(swatch_w, swatch_h) * 0.4), 15)
+                cx1 = x2 - color_size - 4
+                cy1 = y2 - color_size - 4
+                cx2 = x2 - 4
+                cy2 = y2 - 4
+
+                # Filled color square with white border
+                cv2.rectangle(img, (cx1 - 2, cy1 - 2), (cx2 + 2, cy2 + 2), (255, 255, 255), -1)
+                cv2.rectangle(img, (cx1, cy1), (cx2, cy2), color_bgr, -1)
+
+            # Draw label at top-left
             if i < len(swatch_labels):
                 label = swatch_labels[i]
                 font_scale = 0.5
@@ -448,46 +475,44 @@ class CalibrationService:
         """
         Apply color calibration to a single image.
 
-        All operations are done in LINEAR RGB space for correctness:
-        - Detected swatches from camera are gamma-encoded sRGB, need decoding
-        - Reference swatches from XYZ_to_RGB are already linear
-        - Image needs gamma decoding before correction, re-encoding after
+        Designed for LINEAR input images (16-bit TIFFs from camera RAW):
+        - Input image is already linear (no gamma decoding needed)
+        - Detected swatches are from linear image (already linear)
+        - Reference swatches from XYZ_to_RGB are linear
+        - Apply correction in linear space, then gamma encode for output
+
+        This matches the working color_calibration.py script approach.
 
         Args:
             image: Input image (RGB, float 0-1 or uint8/uint16)
             data: ColorCheckerData with calibration info
 
         Returns:
-            Color-corrected image (gamma-encoded sRGB)
+            Color-corrected image (gamma-encoded sRGB for display/saving)
         """
         if not COLOUR_AVAILABLE:
             raise ImportError("colour-science library not installed")
 
-        # 1. Normalize image to float 0-1 if needed
+        # Normalize image to float 0-1 if needed
+        # Note: 16-bit TIFFs from camera are LINEAR, not gamma-encoded
         if image.dtype == np.uint8:
             image = image.astype(np.float32) / 255.0
         elif image.dtype == np.uint16:
             image = image.astype(np.float32) / 65535.0
 
-        # 2. Decode image from gamma sRGB to linear RGB
-        image_linear = colour.cctf_decoding(image, 'sRGB')
+        # NO gamma decoding - TIFF images are already linear
+        # detected_swatches are also from linear TIFF, so already linear
+        # reference_swatches are linear (from XYZ_to_RGB)
 
-        # 3. Decode detected swatches from gamma sRGB to linear RGB
-        # (detected swatches are sampled from gamma-encoded image)
-        detected_linear = colour.cctf_decoding(data.detected_swatches, 'sRGB')
-
-        # 4. Reference swatches are already linear (from XYZ_to_RGB)
-        reference_linear = data.reference_swatches
-
-        # 5. Apply color correction in linear space
-        corrected_linear = colour.colour_correction(
-            image_linear,
-            detected_linear,
-            reference_linear
+        # Apply color correction in linear space
+        corrected = colour.colour_correction(
+            image,
+            data.detected_swatches,
+            data.reference_swatches
         )
 
-        # 6. Encode back to gamma sRGB
-        corrected = colour.cctf_encoding(corrected_linear, 'sRGB')
+        # Encode to gamma sRGB for display/saving
+        corrected = colour.cctf_encoding(np.clip(corrected, 0, 1), 'sRGB')
 
         return corrected
 
@@ -613,13 +638,12 @@ class CalibrationService:
 
     def _get_reference_checker(self) -> 'ColourChecker':
         """
-        Get reference ColorChecker (standard orientation).
+        Get reference ColorChecker with horizontal flip to match camera orientation.
 
-        The reference swatches should never be flipped - they represent
-        the standard. Instead, detected swatches should be flipped/rotated
-        to match the reference orientation.
+        This matches the working color_calibration.py script which flips
+        the reference checker horizontally before computing reference swatches.
         """
-        return REFERENCE_COLOUR_CHECKER
+        return self._flip_colour_checker(REFERENCE_COLOUR_CHECKER, 'horizontal')
 
     def _flip_colour_checker(self, colour_checker: 'ColourChecker', flip_axis: str) -> 'ColourChecker':
         """
@@ -639,9 +663,12 @@ class CalibrationService:
 
         # Flip both names and values
         if flip_axis == 'horizontal':
-            # Flip ALL columns (standard horizontal flip)
-            name_array = name_array[:, ::-1]
-            swatch_array = swatch_array[:, ::-1, :]
+            # Match working color_calibration.py: only flip rows 0 and 2
+            # This is specific to how the ColorChecker appears in the camera setup
+            name_array[0] = name_array[0][::-1]
+            name_array[2] = name_array[2][::-1]
+            swatch_array[0] = swatch_array[0][::-1]
+            swatch_array[2] = swatch_array[2][::-1]
         elif flip_axis == 'vertical':
             swatch_array = np.flipud(swatch_array)
             name_array = np.flipud(name_array)

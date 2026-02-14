@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   Folder, FileImage, ArrowLeft, ChevronRight, Home, X,
   ZoomIn, ZoomOut, RotateCcw, Download, Loader2, Image as ImageIcon, Trash2
 } from 'lucide-react';
-import { browsePath, getMediaUrl, deleteFolder } from '@/lib/api';
+import { browsePath, getMediaUrl, deleteFolder, deleteFile } from '@/lib/api';
 
 interface BreadcrumbItem {
   name: string;
@@ -36,6 +36,21 @@ interface BrowseResponse {
 }
 
 export default function GalleryPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-cloud flex items-center justify-center">
+        <div className="flex items-center gap-3 text-slate-500">
+          <Loader2 className="w-6 h-6 animate-spin" />
+          <span>Loading gallery...</span>
+        </div>
+      </div>
+    }>
+      <GalleryContent />
+    </Suspense>
+  );
+}
+
+function GalleryContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const currentPath = searchParams.get('path') || '';
@@ -44,6 +59,12 @@ export default function GalleryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [confirmModal, setConfirmModal] = useState<{
+    open: boolean;
+    type: 'folder' | 'file';
+    path: string;
+    name: string;
+  }>({ open: false, type: 'folder', path: '', name: '' });
 
   // Image viewer state
   const [viewerOpen, setViewerOpen] = useState(false);
@@ -93,12 +114,34 @@ export default function GalleryPage() {
     router.push(`/gallery${path ? `?path=${encodeURIComponent(path)}` : ''}`);
   };
 
-  const handleDelete = async (folderPath: string, folderName: string) => {
-    if (!confirm(`Delete "${folderName}" and all its contents?`)) return;
+  const requestDelete = (type: 'folder' | 'file', path: string, name: string) => {
+    setConfirmModal({ open: true, type, path, name });
+  };
 
+  const handleConfirmDelete = async () => {
+    const { type, path } = confirmModal;
+    setConfirmModal(m => ({ ...m, open: false }));
     setDeleting(true);
     try {
-      await deleteFolder(folderPath);
+      if (type === 'folder') {
+        await deleteFolder(path);
+      } else {
+        await deleteFile(path);
+      }
+      // If we deleted the currently viewed image, close viewer or navigate to next
+      if (type === 'file' && viewerOpen && viewerImage?.path === path) {
+        const remaining = viewerImages.filter(i => i.path !== path);
+        if (remaining.length === 0) {
+          closeViewer();
+        } else {
+          const newIndex = Math.min(viewerIndex, remaining.length - 1);
+          setViewerImages(remaining);
+          setViewerIndex(newIndex);
+          setViewerImage(remaining[newIndex]);
+          setZoom(1);
+          setPosition({ x: 0, y: 0 });
+        }
+      }
       fetchData();
     } catch (err: any) {
       alert(err.response?.data?.detail || 'Failed to delete');
@@ -214,7 +257,12 @@ export default function GalleryPage() {
     );
   }
 
-  const imageItems = data?.items.filter(i => i.type === 'file' && i.is_image) || [];
+  // Hide internal folders (cropped_thumbnail, full_webview) from gallery
+  const HIDDEN_FOLDERS = new Set(['cropped_thumbnail', 'full_webview']);
+  const visibleItems = data?.items.filter(i =>
+    !(i.type === 'folder' && HIDDEN_FOLDERS.has(i.name))
+  ) || [];
+  const imageItems = visibleItems.filter(i => i.type === 'file' && i.is_image);
 
   return (
     <div className="min-h-screen bg-cloud">
@@ -232,7 +280,7 @@ export default function GalleryPage() {
               <div>
                 <h1 className="text-xl font-semibold text-slate-800">Gallery</h1>
                 <p className="text-sm text-slate-500">
-                  {data?.folder_count || 0} folders, {data?.file_count || 0} files
+                  {visibleItems.filter(i => i.type === 'folder').length} folders, {visibleItems.filter(i => i.type === 'file').length} files
                 </p>
               </div>
             </div>
@@ -262,7 +310,7 @@ export default function GalleryPage() {
 
       {/* Content */}
       <main className="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
-        {data?.items.length === 0 ? (
+        {visibleItems.length === 0 ? (
           <div className="text-center py-16 text-slate-500">
             <Folder className="w-16 h-16 mx-auto mb-4 opacity-30" />
             <p>This folder is empty</p>
@@ -275,7 +323,7 @@ export default function GalleryPage() {
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-            {data?.items.map((item) => (
+            {visibleItems.map((item) => (
               <div
                 key={item.path}
                 className="group relative bg-white border border-slate-200 rounded-2xl overflow-hidden transition-all hover:shadow-lg hover:border-teal-300"
@@ -300,7 +348,7 @@ export default function GalleryPage() {
                     </div>
                   ) : item.is_image && item.thumbnail_url ? (
                     <img
-                      src={getMediaUrl(item.thumbnail_url.replace('/media/captures/', ''))}
+                      src={`${getMediaUrl(item.thumbnail_url.replace('/media/captures/', ''))}?t=${item.modified}`}
                       alt={item.name}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                       loading="lazy"
@@ -322,30 +370,65 @@ export default function GalleryPage() {
                   </p>
                 </div>
 
-                {/* Delete button for top-level folders */}
-                {item.type === 'folder' && !currentPath && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDelete(item.name, item.name);
-                    }}
-                    disabled={deleting}
-                    className="absolute top-2 right-2 p-1.5 rounded-lg bg-red-500/80 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
-                    title="Delete folder"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                )}
-
-                {/* Hover overlay for images */}
-                {item.is_image && (
-                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors pointer-events-none" />
-                )}
+                {/* Delete button */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    requestDelete(
+                      item.type === 'folder' ? 'folder' : 'file',
+                      item.path,
+                      item.name
+                    );
+                  }}
+                  disabled={deleting}
+                  className="absolute top-2 right-2 z-10 p-1.5 rounded-lg bg-red-500/80 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
+                  title={`Delete ${item.type === 'folder' ? 'folder' : 'file'}`}
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
               </div>
             ))}
           </div>
         )}
       </main>
+
+      {/* Confirmation Modal */}
+      {confirmModal.open && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full mx-4 overflow-hidden">
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2 rounded-full bg-red-100">
+                  <Trash2 className="w-5 h-5 text-red-600" />
+                </div>
+                <h3 className="text-lg font-semibold text-slate-800">
+                  Delete {confirmModal.type === 'folder' ? 'Folder' : 'File'}
+                </h3>
+              </div>
+              <p className="text-slate-600 text-sm">
+                {confirmModal.type === 'folder'
+                  ? <>Are you sure you want to delete <strong>{confirmModal.name}</strong> and all its contents? This cannot be undone.</>
+                  : <>Are you sure you want to delete <strong>{confirmModal.name}</strong>? This cannot be undone.</>
+                }
+              </p>
+            </div>
+            <div className="flex border-t border-slate-200">
+              <button
+                onClick={() => setConfirmModal(m => ({ ...m, open: false }))}
+                className="flex-1 px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmDelete}
+                className="flex-1 px-4 py-3 text-sm font-medium text-white bg-red-600 hover:bg-red-700 transition-colors"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Image Viewer Modal */}
       {viewerOpen && viewerImage && (
@@ -391,6 +474,16 @@ export default function GalleryPage() {
               >
                 <Download className="w-5 h-5" />
               </a>
+              <button
+                onClick={() => {
+                  requestDelete('file', viewerImage.path, viewerImage.name);
+                }}
+                disabled={deleting}
+                className="p-2 rounded-lg bg-red-500/80 hover:bg-red-600 text-white transition-colors"
+                title="Delete image"
+              >
+                <Trash2 className="w-5 h-5" />
+              </button>
               <button
                 onClick={closeViewer}
                 className="p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors ml-2"
@@ -439,7 +532,7 @@ export default function GalleryPage() {
             >
               <img
                 key={viewerImage.path}
-                src={getMediaUrl(getImageUrl(viewerImage, true))}
+                src={`${getMediaUrl(getImageUrl(viewerImage, true))}?t=${viewerImage.modified}`}
                 alt={viewerImage.name}
                 className="transition-transform select-none object-contain"
                 style={{
@@ -454,7 +547,7 @@ export default function GalleryPage() {
                   if (!target.dataset.fallback) {
                     target.dataset.fallback = 'true';
                     // Fallback to original path if cropped version fails
-                    target.src = getMediaUrl(viewerImage.url?.replace('/media/captures/', '') || viewerImage.path);
+                    target.src = `${getMediaUrl(viewerImage.url?.replace('/media/captures/', '') || viewerImage.path)}?t=${viewerImage.modified}`;
                   }
                 }}
               />

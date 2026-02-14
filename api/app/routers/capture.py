@@ -134,46 +134,60 @@ async def browse_path(path: str = ""):
             ext = item.suffix.lower()
             is_image = ext in [".jpg", ".jpeg", ".png", ".gif", ".webp", ".tiff", ".tif", ".arw", ".cr2", ".nef", ".dng"]
 
-            # Find thumbnail if available - prefer cropped_thumbnail over thumbnail
+            # Find thumbnail and display/download URLs
+            # Only override with cropped versions when browsing the session root or cropped folder
+            # When browsing raw/, tiff/, thumbnail/ etc. — show that folder's own content
             thumbnail_url = None
-            if is_image and path:
-                parent_parts = path.split("/")
-                if len(parent_parts) >= 1:
-                    session_folder = parent_parts[0]
-                    # Try cropped_thumbnail first (post-crop)
-                    cropped_thumb_path = settings.CAPTURES_DIR / session_folder / "cropped_thumbnail" / f"{item.stem}.jpg"
-                    thumb_path = settings.CAPTURES_DIR / session_folder / "thumbnail" / f"{item.stem}.jpg"
-                    if cropped_thumb_path.exists():
-                        thumbnail_url = f"/media/captures/{session_folder}/cropped_thumbnail/{item.stem}.jpg"
-                    elif thumb_path.exists():
-                        thumbnail_url = f"/media/captures/{session_folder}/thumbnail/{item.stem}.jpg"
-
-            # For display URL, prefer web-displayable formats (jpg/png)
-            # For download URL, prefer high-quality (tiff/raw)
             display_url = f"/media/captures/{rel_path}"
             download_url = f"/media/captures/{rel_path}"
 
+            DERIVED_FOLDERS = {"raw", "tiff", "thumbnail", "cropped_thumbnail", "full_webview"}
             if is_image and path:
                 parent_parts = path.split("/")
-                if len(parent_parts) >= 1:
-                    session_folder = parent_parts[0]
+                session_folder = parent_parts[0] if len(parent_parts) >= 1 else None
+                current_subfolder = parent_parts[1] if len(parent_parts) >= 2 else None
 
-                    # Display URL: prefer cropped_thumbnail (jpg) > full_webview (jpg)
-                    cropped_thumb = settings.CAPTURES_DIR / session_folder / "cropped_thumbnail" / f"{item.stem}.jpg"
-                    full_webview = settings.CAPTURES_DIR / session_folder / "full_webview" / f"{item.stem}.jpg"
+                if session_folder:
+                    if current_subfolder in DERIVED_FOLDERS:
+                        # Browsing a specific derived folder — use its own thumbnail, don't override
+                        thumb_path = settings.CAPTURES_DIR / session_folder / "thumbnail" / f"{item.stem}.jpg"
+                        if thumb_path.exists():
+                            thumbnail_url = f"/media/captures/{session_folder}/thumbnail/{item.stem}.jpg"
+                        # Display: use full_webview if available (viewable JPG of this folder's content)
+                        full_webview = settings.CAPTURES_DIR / session_folder / "full_webview" / f"{item.stem}.jpg"
+                        if full_webview.exists():
+                            display_url = f"/media/captures/{session_folder}/full_webview/{item.stem}.jpg"
+                    elif current_subfolder == "cropped":
+                        # Browsing cropped folder — use cropped_thumbnail for cards, cropped_thumbnail for view
+                        cropped_thumb_path = settings.CAPTURES_DIR / session_folder / "cropped_thumbnail" / f"{item.stem}.jpg"
+                        if cropped_thumb_path.exists():
+                            thumbnail_url = f"/media/captures/{session_folder}/cropped_thumbnail/{item.stem}.jpg"
+                            display_url = f"/media/captures/{session_folder}/cropped_thumbnail/{item.stem}.jpg"
+                        download_url = f"/media/captures/{rel_path}"
+                    else:
+                        # Session root or unknown subfolder — prefer cropped versions
+                        cropped_thumb_path = settings.CAPTURES_DIR / session_folder / "cropped_thumbnail" / f"{item.stem}.jpg"
+                        thumb_path = settings.CAPTURES_DIR / session_folder / "thumbnail" / f"{item.stem}.jpg"
+                        if cropped_thumb_path.exists():
+                            thumbnail_url = f"/media/captures/{session_folder}/cropped_thumbnail/{item.stem}.jpg"
+                        elif thumb_path.exists():
+                            thumbnail_url = f"/media/captures/{session_folder}/thumbnail/{item.stem}.jpg"
 
-                    if cropped_thumb.exists():
-                        display_url = f"/media/captures/{session_folder}/cropped_thumbnail/{item.stem}.jpg"
-                    elif full_webview.exists():
-                        display_url = f"/media/captures/{session_folder}/full_webview/{item.stem}.jpg"
+                        # Display URL: prefer cropped_thumbnail > full_webview
+                        cropped_thumb = settings.CAPTURES_DIR / session_folder / "cropped_thumbnail" / f"{item.stem}.jpg"
+                        full_webview = settings.CAPTURES_DIR / session_folder / "full_webview" / f"{item.stem}.jpg"
+                        if cropped_thumb.exists():
+                            display_url = f"/media/captures/{session_folder}/cropped_thumbnail/{item.stem}.jpg"
+                        elif full_webview.exists():
+                            display_url = f"/media/captures/{session_folder}/full_webview/{item.stem}.jpg"
 
-                    # Download URL: prefer cropped (tiff) > original
-                    cropped_dir = settings.CAPTURES_DIR / session_folder / "cropped"
-                    for ext in ['.tiff', '.jpg', '.jpeg', '.png']:
-                        cropped_path = cropped_dir / f"{item.stem}{ext}"
-                        if cropped_path.exists():
-                            download_url = f"/media/captures/{session_folder}/cropped/{item.stem}{ext}"
-                            break
+                        # Download URL: prefer cropped > original
+                        cropped_dir = settings.CAPTURES_DIR / session_folder / "cropped"
+                        for ext in ['.tiff', '.jpg', '.jpeg', '.png']:
+                            cropped_path = cropped_dir / f"{item.stem}{ext}"
+                            if cropped_path.exists():
+                                download_url = f"/media/captures/{session_folder}/cropped/{item.stem}{ext}"
+                                break
 
             items.append({
                 "name": item.name,
@@ -242,15 +256,79 @@ async def list_folder_contents(folder_name: str):
     }
 
 
-@router.delete("/folders/{folder_name}")
-async def delete_folder(folder_name: str):
+@router.delete("/folders/{folder_path:path}")
+async def delete_folder(folder_path: str):
     """Delete a capture folder and all its contents"""
-    folder_path = settings.CAPTURES_DIR / folder_name
-    
-    if not folder_path.exists():
-        raise HTTPException(status_code=404, detail=f"Folder '{folder_name}' not found")
-    
+    full_path = settings.CAPTURES_DIR / folder_path
+
+    # Prevent path traversal
+    try:
+        full_path.resolve().relative_to(settings.CAPTURES_DIR.resolve())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid path")
+
+    if not full_path.exists():
+        raise HTTPException(status_code=404, detail=f"Folder not found")
+
+    if not full_path.is_dir():
+        raise HTTPException(status_code=400, detail="Path is not a folder")
+
     import shutil
-    shutil.rmtree(folder_path)
-    
-    return {"success": True, "message": f"Deleted folder '{folder_name}'"}
+    shutil.rmtree(full_path)
+
+    # Cascade: deleting paired folders (e.g. cropped -> also delete cropped_thumbnail)
+    FOLDER_PAIRS = {
+        "cropped": "cropped_thumbnail",
+        "cropped_thumbnail": "cropped",
+    }
+    folder_name = full_path.name
+    if folder_name in FOLDER_PAIRS:
+        paired = full_path.parent / FOLDER_PAIRS[folder_name]
+        if paired.exists() and paired.is_dir():
+            shutil.rmtree(paired)
+
+    return {"success": True, "message": f"Deleted folder '{full_path.name}'"}
+
+
+@router.delete("/files/{file_path:path}")
+async def delete_file(file_path: str):
+    """Delete a single file from captures"""
+    full_path = settings.CAPTURES_DIR / file_path
+
+    # Prevent path traversal
+    try:
+        full_path.resolve().relative_to(settings.CAPTURES_DIR.resolve())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid path")
+
+    if not full_path.exists():
+        raise HTTPException(status_code=404, detail=f"File not found")
+
+    if not full_path.is_file():
+        raise HTTPException(status_code=400, detail="Path is not a file")
+
+    full_path.unlink()
+
+    # Also delete associated derived files
+    parts = file_path.split("/")
+    if len(parts) >= 2:
+        session_folder = parts[0]
+        source_dir = parts[1] if len(parts) >= 3 else None
+        stem = full_path.stem
+
+        # Map: when deleting from source_dir, also clean up these sibling dirs
+        SIBLING_MAP = {
+            "cropped": ["cropped_thumbnail"],
+            "cropped_thumbnail": ["cropped"],
+        }
+        # Default: clean all derived dirs
+        dirs_to_clean = SIBLING_MAP.get(source_dir, ["thumbnail", "cropped_thumbnail", "full_webview", "cropped"])
+
+        for derived_dir in dirs_to_clean:
+            derived_parent = settings.CAPTURES_DIR / session_folder / derived_dir
+            if derived_parent.exists():
+                for f in derived_parent.iterdir():
+                    if f.stem == stem:
+                        f.unlink()
+
+    return {"success": True, "message": f"Deleted '{full_path.name}'"}

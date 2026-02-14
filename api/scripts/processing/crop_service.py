@@ -135,9 +135,10 @@ class CropService:
                 "source_type": source_type,
             }
 
-    def auto_detect_crop(self, batch_path: str) -> Optional[Dict]:
+    def auto_detect_crop(self, batch_path: str, crop_size: int = 2048) -> Optional[Dict]:
         """
-        Auto-detect crop boundary on TOP image only.
+        Auto-detect crop boundary on TOP image, then center a square crop
+        of crop_size x crop_size on the detected region.
         Returns detected bbox without saving anything.
         """
         batch_path = Path(batch_path)
@@ -160,9 +161,41 @@ class CropService:
 
         # Try to auto-detect crop boundary using contour detection
         try:
-            bbox = self._detect_fabric_boundary(img)
-            if bbox:
-                x1, y1, x2, y2 = bbox
+            detected_bbox = self._detect_fabric_boundary(img)
+            if detected_bbox:
+                dx1, dy1, dx2, dy2 = detected_bbox
+
+                # Center of detected region
+                cx = (dx1 + dx2) // 2
+                cy = (dy1 + dy2) // 2
+
+                # Clamp crop_size to image dimensions
+                actual_size = min(crop_size, w, h)
+                half = actual_size // 2
+
+                # Center the square crop on the detected region, clamped to image bounds
+                x1 = cx - half
+                y1 = cy - half
+                x2 = x1 + actual_size
+                y2 = y1 + actual_size
+
+                # Shift if out of bounds
+                if x1 < 0:
+                    x2 -= x1
+                    x1 = 0
+                if y1 < 0:
+                    y2 -= y1
+                    y1 = 0
+                if x2 > w:
+                    x1 -= (x2 - w)
+                    x2 = w
+                if y2 > h:
+                    y1 -= (y2 - h)
+                    y2 = h
+
+                # Final clamp
+                x1 = max(0, x1)
+                y1 = max(0, y1)
 
                 # Generate preview of cropped result
                 cropped = img[y1:y2, x1:x2]
@@ -175,6 +208,8 @@ class CropService:
                     "crop_height": y2 - y1,
                     "original_width": w,
                     "original_height": h,
+                    "crop_size": actual_size,
+                    "detected_bbox": [dx1, dy1, dx2, dy2],
                     "preview_url": preview_b64,
                     "method": "auto",
                 }

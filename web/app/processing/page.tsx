@@ -723,9 +723,9 @@ export default function ProcessingPage() {
                 originalHeight={topImage.height}
                 isProcessing={processing === 'crop'}
                 onCancel={() => setShowCropModal(false)}
-                onAutoDetect={async () => {
+                onAutoDetect={async (cropSize: number) => {
                   try {
-                    const res = await autoDetectCrop(selectedBatch.name);
+                    const res = await autoDetectCrop(selectedBatch.name, cropSize);
                     if (res.data.success && res.data.bbox) {
                       // Convert bbox to 4 points
                       const [x1, y1, x2, y2] = res.data.bbox;
@@ -1023,15 +1023,16 @@ export default function ProcessingPage() {
                   <Crop className="w-4 h-4 mr-2" />
                   Start Cropping
                 </Link>
-                <button
-                  onClick={() => { loadProfiles(); setShowCalibrationModal(true); }}
-                  disabled={processing !== null || selectedBatch?.crop_status !== 'completed'}
-                  className="px-4 py-2 bg-violet-600 text-white rounded-xl hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                <Link
+                  href={`/processing/calibration/${selectedBatch.name}`}
+                  className={`px-4 py-2 bg-violet-600 text-white rounded-xl hover:bg-violet-700 transition-colors inline-flex items-center ${
+                    selectedBatch?.crop_status !== 'completed' ? 'opacity-50 pointer-events-none' : ''
+                  }`}
                   title={selectedBatch?.crop_status !== 'completed' ? 'Complete cropping first' : ''}
                 >
-                  <Palette className="w-4 h-4 inline mr-2" />
-                  Run Calibration
-                </button>
+                  <Palette className="w-4 h-4 mr-2" />
+                  Color Calibration
+                </Link>
                 <button
                   onClick={() => setShowPBRModal(true)}
                   disabled={processing !== null || selectedBatch?.crop_status !== 'completed'}

@@ -28,6 +28,7 @@ class ManualCropRequest(BaseModel):
 class AutoCropRequest(BaseModel):
     batch_name: str
     prompt: str = "fabric sample"
+    crop_size: int = 2048
 
 
 class CalibrateRequest(BaseModel):
@@ -127,7 +128,7 @@ async def auto_detect_crop(request: AutoCropRequest):
 
     try:
         crop_service = CropService(use_gpu=settings.USE_GPU)
-        result = crop_service.auto_detect_crop(str(batch_path))
+        result = crop_service.auto_detect_crop(str(batch_path), crop_size=request.crop_size)
 
         return result
 
@@ -250,7 +251,7 @@ async def auto_crop(request: AutoCropRequest, background_tasks: BackgroundTasks)
         crop_service = CropService(use_gpu=settings.USE_GPU)
 
         # Auto-detect first
-        detect_result = crop_service.auto_detect_crop(str(batch_path))
+        detect_result = crop_service.auto_detect_crop(str(batch_path), crop_size=request.crop_size)
 
         if not detect_result.get("success"):
             return {

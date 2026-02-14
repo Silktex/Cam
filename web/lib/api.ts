@@ -35,6 +35,8 @@ export const getFolderContents = (folder: string) =>
   api.get(`/api/capture/folders/${folder}`);
 export const deleteFolder = (folder: string) =>
   api.delete(`/api/capture/folders/${folder}`);
+export const deleteFile = (filePath: string) =>
+  api.delete(`/api/capture/files/${filePath}`);
 export const browsePath = (path: string = "") =>
   api.get(`/api/capture/browse/${path}`);
 export const getMediaUrl = (path: string) => `${API_BASE_URL}/media/captures/${path}`;
@@ -141,8 +143,8 @@ export const updateMediaPath = (path: string) =>
 export const getTopImageForCrop = (batchName: string) =>
   api.get(`/api/processing/crop/top-image/${batchName}`);
 
-export const autoDetectCrop = (batchName: string) =>
-  api.post('/api/processing/crop/auto-detect', { batch_name: batchName });
+export const autoDetectCrop = (batchName: string, cropSize: number = 2048) =>
+  api.post('/api/processing/crop/auto-detect', { batch_name: batchName, crop_size: cropSize });
 
 export const previewManualCrop = (batchName: string, bbox: number[]) =>
   api.post('/api/processing/crop/preview-manual', { batch_name: batchName, bbox });
@@ -251,6 +253,16 @@ export const getReferenceSwatches = () =>
 
 export const getDetectedSwatches = (detectionId: string) =>
   api.get(`/api/colorchecker/detected-swatches/${detectionId}`);
+
+// Calibration page API
+export const getColorCheckerImageForBatch = (batchName: string) =>
+  api.get(`/api/processing/colorchecker/batch-image/${batchName}`);
+
+export const applyCalibrationToBatch = (batchName: string, profileName: string) =>
+  api.post('/api/processing/calibrate/apply', {
+    batch_name: batchName,
+    profile_name: profileName,
+  });
 
 // Batch Types
 export interface BatchSummary {
