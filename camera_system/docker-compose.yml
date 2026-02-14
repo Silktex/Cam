@@ -1,0 +1,26 @@
+services:
+  camera-system:
+    build:
+      context: ..
+      dockerfile: camera_system/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+        NEXT_PUBLIC_WS_URL: ws://localhost:8000
+    ports:
+      - "3000:3000"
+      - "8000:8000"
+    volumes:
+      - media-data:/app/api/media
+      - api-data:/app/api/data
+    environment:
+      - DEBUG=false
+      - ESP32_HOST=192.168.0.44
+      - USE_GPU=false
+    devices:
+      - /dev/bus/usb:/dev/bus/usb
+    privileged: true
+    restart: unless-stopped
+
+volumes:
+  media-data:
+  api-data:
