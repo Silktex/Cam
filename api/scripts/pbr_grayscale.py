@@ -44,18 +44,6 @@ def load_and_pair_images(image_dir, downsample_scale=1.0):
         'segment_8': [1, 1, 1]
     }
 
-    # light_directions = {
-    #     'top': [0, 0, 1],
-    #     'front': [0, 1, 1],
-    #     'front_left': [-1, 1, 1],
-    #     'left': [-1, 0, 1],
-    #     # 'rear_left': [-1, -1, 1],
-    #     'rear': [0, -1, 1],
-    #     'rear_right': [1, -1, 1],
-    #     'right': [1, 0, 1],
-    #     'front_right': [1, 1, 1]
-    # }
-
     image_paths = [os.path.join(image_dir, f) for f in os.listdir(image_dir) 
                if f.lower().endswith(('.png', '.tiff', '.tif', '.jpg', '.jpeg'))]
     paired_images = []

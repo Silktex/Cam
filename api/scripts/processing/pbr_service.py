@@ -147,18 +147,27 @@ class PBRService:
             output_folder = batch_path / "pbr_grayscale"
             output_folder.mkdir(exist_ok=True)
 
-            # Load and pair images
-            images, light_dirs = self._load_and_pair_images(source_folder, selected_images, grayscale=True)
+            # Load images: top image = albedo, side images = photometric stereo
+            top_image, side_images, light_dirs = self._load_and_pair_images(
+                source_folder, selected_images, grayscale=True
+            )
 
-            if len(images) < 4:
+            if len(side_images) < 3:
                 return PBRResult(
                     success=False,
                     mode="grayscale",
-                    error=f"Need at least 4 images, found {len(images)}"
+                    error=f"Need at least 3 side-lit images, found {len(side_images)}"
                 )
 
-            # Compute photometric stereo
-            albedo, normals = self._photometric_stereo_grayscale(images, light_dirs)
+            # Top image is the albedo (direct capture under even top light)
+            if top_image is not None:
+                albedo = top_image
+            else:
+                logger.warning("No top image found, computing albedo from photometric stereo")
+                albedo, _ = self._photometric_stereo_grayscale(side_images, light_dirs)
+
+            # Compute normals from side-lit images only
+            normals = self._compute_normals_grayscale(side_images, light_dirs)
             roughness = self._compute_roughness(normals)
             height_map = self._compute_height_map(normals)
             normals_rgb = self._visualize_normals(normals)
@@ -200,18 +209,27 @@ class PBRService:
             output_folder = batch_path / "pbr_colored"
             output_folder.mkdir(exist_ok=True)
 
-            # Load and pair images (color)
-            images, light_dirs = self._load_and_pair_images(source_folder, selected_images, grayscale=False)
+            # Load images: top image = albedo, side images = photometric stereo
+            top_image, side_images, light_dirs = self._load_and_pair_images(
+                source_folder, selected_images, grayscale=False
+            )
 
-            if len(images) < 4:
+            if len(side_images) < 3:
                 return PBRResult(
                     success=False,
                     mode="color",
-                    error=f"Need at least 4 images, found {len(images)}"
+                    error=f"Need at least 3 side-lit images, found {len(side_images)}"
                 )
 
-            # Compute photometric stereo (color)
-            albedo, normals = self._photometric_stereo_color(images, light_dirs)
+            # Top image is the albedo (direct capture under even top light)
+            if top_image is not None:
+                albedo = top_image
+            else:
+                logger.warning("No top image found, computing albedo from photometric stereo")
+                albedo, _ = self._photometric_stereo_color(side_images, light_dirs)
+
+            # Compute normals from side-lit images only
+            normals = self._compute_normals_color(side_images, light_dirs)
             roughness = self._compute_roughness(normals)
             height_map = self._compute_height_map(normals)
             normals_rgb = self._visualize_normals(normals)
@@ -247,10 +265,19 @@ class PBRService:
         source_folder: Path,
         selected_images: List[str] = None,
         grayscale: bool = False
-    ) -> Tuple[List[np.ndarray], np.ndarray]:
-        """Load images and pair with light directions."""
-        images = []
-        light_dirs = []
+    ) -> Tuple[Optional[np.ndarray], List[np.ndarray], np.ndarray]:
+        """
+        Load images and separate top (albedo) from side-lit (photometric stereo).
+
+        Returns:
+            (top_image, side_images, side_light_dirs)
+            - top_image: calibrated top-light image used as albedo (None if not found)
+            - side_images: list of side-lit images for photometric stereo
+            - side_light_dirs: normalized light direction vectors for side images
+        """
+        top_image = None
+        side_images = []
+        side_light_dirs = []
 
         image_files = self._list_images(source_folder)
 
@@ -262,14 +289,15 @@ class PBRService:
                 continue
 
             # Match to light direction
+            matched_position = None
             matched_dir = None
             for position, direction in LIGHT_DIRECTIONS.items():
-                # Check for position in filename
                 if position in filename or position.replace('_', '') in filename:
+                    matched_position = position
                     matched_dir = direction
                     break
 
-            if matched_dir is None:
+            if matched_position is None:
                 logger.warning(f"No light direction match for: {filename}")
                 continue
 
@@ -291,21 +319,26 @@ class PBRService:
             # Preprocess (denoise + downsample)
             img = self._preprocess_image(img)
 
-            images.append(img)
-            light_dirs.append(matched_dir)
-            logger.debug(f"Loaded {filename} -> {position}")
+            # Top image → albedo; side images → photometric stereo
+            if matched_position == 'top':
+                top_image = img
+                logger.info(f"Using top image as albedo: {image_path.name}")
+            else:
+                side_images.append(img)
+                side_light_dirs.append(matched_dir)
+                logger.debug(f"Loaded side image {filename} -> {matched_position}")
 
-        if not images:
-            raise ValueError(f"No images loaded from {source_folder}")
+        if not side_images:
+            raise ValueError(f"No side-lit images loaded from {source_folder}")
 
         # Normalize light directions
-        light_dirs = np.array(light_dirs, dtype=np.float32)
-        norms = np.linalg.norm(light_dirs, axis=1, keepdims=True)
+        side_light_dirs = np.array(side_light_dirs, dtype=np.float32)
+        norms = np.linalg.norm(side_light_dirs, axis=1, keepdims=True)
         norms[norms == 0] = 1e-8
-        light_dirs /= norms
+        side_light_dirs /= norms
 
-        logger.info(f"Loaded {len(images)} images with light directions")
-        return images, light_dirs
+        logger.info(f"Loaded {len(side_images)} side images + {'top' if top_image is not None else 'no top'}")
+        return top_image, side_images, side_light_dirs
 
     def _preprocess_image(self, img: np.ndarray) -> np.ndarray:
         """Denoise and downsample image."""
@@ -402,6 +435,56 @@ class PBRService:
         albedo_rgb = cv2.cvtColor(albedo_rgb, cv2.COLOR_RGB2BGR)
 
         return albedo_rgb, normals
+
+    def _compute_normals_grayscale(
+        self,
+        images: List[np.ndarray],
+        light_dirs: np.ndarray
+    ) -> np.ndarray:
+        """Compute normals from side-lit grayscale images using photometric stereo."""
+        num_images = len(images)
+        h, w = images[0].shape
+
+        I = np.stack(images, axis=0).astype(np.float32)
+        L = light_dirs.astype(np.float32)
+        I_flat = I.reshape(num_images, -1)
+
+        G, _, _, _ = lstsq(L, I_flat)
+
+        albedo = np.linalg.norm(G, axis=0).reshape(h, w)
+        albedo_safe = np.where(albedo == 0, 1e-8, albedo)
+
+        normals = (G / albedo_safe.reshape(1, -1)).T.reshape(h, w, 3)
+        normals = np.nan_to_num(normals).astype(np.float32)
+
+        return normals
+
+    def _compute_normals_color(
+        self,
+        images: List[np.ndarray],
+        light_dirs: np.ndarray
+    ) -> np.ndarray:
+        """Compute normals from side-lit color images using photometric stereo."""
+        num_images = len(images)
+        h, w, channels = images[0].shape
+
+        shadow_mask = self._detect_shadows(images)
+
+        I = np.array([img.reshape(-1, channels) for img in images]).transpose(1, 0, 2)
+        L = light_dirs.astype(np.float32)
+
+        # Compute normals from intensity (average across channels)
+        I_intensity = np.mean(I, axis=2)
+        G_intensity, _, _, _ = lstsq(L, I_intensity.T)
+
+        albedo_intensity = np.linalg.norm(G_intensity, axis=0)
+        albedo_intensity_safe = np.where(albedo_intensity == 0, 1e-8, albedo_intensity)
+
+        normals = (G_intensity / albedo_intensity_safe).T.reshape(h, w, 3)
+        normals = np.nan_to_num(normals, nan=0.0, posinf=0.0, neginf=0.0)
+        normals[~shadow_mask] = [0, 0, 1]
+
+        return normals
 
     def _detect_shadows(self, images: List[np.ndarray], threshold: float = 0.1) -> np.ndarray:
         """Detect shadow regions based on intensity threshold."""

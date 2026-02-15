@@ -16,12 +16,8 @@ class Settings(BaseSettings):
     PORT: int = 8000
     DEBUG: bool = True
     
-    # CORS
-    CORS_ORIGINS: List[str] = [
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:8000",
-    ]
+    # CORS — allow all origins
+    CORS_ORIGINS: List[str] = ["*"]
     
     # Media storage
     MEDIA_DIR: Path = Path(__file__).parent.parent / "media"

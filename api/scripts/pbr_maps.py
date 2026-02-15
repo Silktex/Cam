@@ -31,17 +31,7 @@ class ImageProcessor:
     @staticmethod
     def load_and_pair_images(image_dir: str, downsample_scale: float = 1.0) -> tuple[list[np.ndarray], np.ndarray]:
         """Load images from a directory and pair them with light directions."""
-        # light_directions = {
-        #     'segment_0': [0, 0, 1],
-        #     'segment_1': [0, 1, 1],
-        #     'segment_2': [-1, 1, 1],
-        #     'segment_3': [-1, 0, 1],
-        #     'segment_4': [-1, -1, 1],
-        #     'segment_5': [0, -1, 1],
-        #     'segment_6': [1, -1, 1],
-        #     'segment_7': [1, 0, 1],
-        #     'segment_8': [1, 1, 1]
-        # }
+
         light_directions = {
             'top': [0, 0, 1],
             'front': [0, 1, 1],
