@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
-  Folder, FileImage, ChevronRight, Home, X,
+  Folder, FileImage, ChevronRight, Home, X, ArrowLeft,
   ZoomIn, ZoomOut, RotateCcw, Download, Loader2, Image as ImageIcon, Trash2,
   RefreshCw, CheckCircle2
 } from 'lucide-react';
