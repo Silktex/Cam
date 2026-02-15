@@ -1,126 +1,157 @@
 'use client';
 
-import { useState } from 'react';
-import { HealthMonitor } from '@/components/health-monitor';
-import { CameraControl } from '@/components/camera-control';
-import { CapturePanel } from '@/components/capture-panel';
-import { ColorCheckerPanel } from '@/components/color-checker-panel';
-import { StreamViewer } from '@/components/stream-viewer';
-import { CameraSettings } from '@/components/camera-settings';
-import { Camera, Images, Lightbulb, Layers, Workflow, Palette } from 'lucide-react';
-import Link from 'next/link';
+import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic';
+import { useLightsWebSocket } from '@/hooks/useLightsWebSocket';
+
+const DashboardHeader = dynamic(() => import('./all/components/DashboardHeader'), {
+  ssr: false,
+});
+const CaptureForm = dynamic(() => import('./all/components/CaptureForm'), {
+  ssr: false,
+});
+const BatchCaptureForm = dynamic(() => import('./all/components/BatchCaptureForm'), {
+  ssr: false,
+});
+const ColorCheckerForm = dynamic(
+  () => import('./all/components/ColorCheckerForm'),
+  { ssr: false }
+);
+const LightControlPanel = dynamic(
+  () => import('./all/components/LightControlPanel'),
+  { ssr: false }
+);
+const LiveViewPanel = dynamic(() => import('./all/components/LiveViewPanel'), {
+  ssr: false,
+});
+const CompactCameraSettings = dynamic(
+  () => import('./all/components/CompactCameraSettings'),
+  { ssr: false }
+);
+
+type Tab = 'single' | 'color' | 'batch';
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<'capture' | 'colorchecker'>('capture');
+  const router = useRouter();
+  const [activeTab, setActiveTab] = useState<Tab>('single');
+  const [showLiveView, setShowLiveView] = useState(true);
+  const {
+    lights,
+    connected,
+    wsConnected,
+    setLight,
+    setAllLights,
+    requestState,
+  } = useLightsWebSocket();
+
+  const tabs: { key: Tab; label: string }[] = [
+    { key: 'single', label: 'Single' },
+    { key: 'color', label: 'Color' },
+    { key: 'batch', label: 'Batch' },
+  ];
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Skip if user is typing in an input/textarea/select
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+      // Let Cmd/Ctrl shortcuts pass through (e.g. Cmd+S for capture)
+      if (e.metaKey || e.ctrlKey) return;
+
+      switch (e.key) {
+        case ' ':
+          e.preventDefault();
+          // Toggle all lights: if any are on, turn all off; otherwise turn all on
+          const anyOn = lights.some((l) => l.on);
+          setAllLights(!anyOn);
+          break;
+        case '1': case '2': case '3': case '4':
+        case '5': case '6': case '7': case '8': {
+          const idx = parseInt(e.key) - 1;
+          const light = lights[idx];
+          if (light) setLight(light.id, !light.on);
+          break;
+        }
+        case 's':
+          setActiveTab('single');
+          break;
+        case 'b':
+          setActiveTab('batch');
+          break;
+        case 'c':
+          setActiveTab('color');
+          break;
+        case 'l':
+          setShowLiveView((prev) => !prev);
+          break;
+        case 'p':
+          router.push('/processing');
+          break;
+        case 'g':
+          router.push('/gallery');
+          break;
+        case 'd':
+          router.push('/');
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [lights, setLight, setAllLights, router]);
 
   return (
-    <div className="min-h-screen bg-cloud">
-      {/* Header */}
-      <header className="bg-white border-b border-slate-200/60">
-        <div className="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Camera className="w-8 h-8 text-teal-600" />
-              <div>
-                <h1 className="text-2xl font-semibold text-slate-800">
-                  Camera Control
-                </h1>
-                <p className="text-sm text-slate-500">
-                  Sony A7R III via gphoto2
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <Link
-                href="/batch"
-                className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 rounded-2xl hover:bg-slate-200 transition-colors"
-              >
-                <Layers className="w-5 h-5" />
-                <span>Batch</span>
-              </Link>
-              <Link
-                href="/lights"
-                className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-2xl hover:bg-teal-700 transition-colors shadow-teal-glow"
-              >
-                <Lightbulb className="w-5 h-5" />
-                <span>Lights</span>
-              </Link>
-              <Link
-                href="/gallery"
-                className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 rounded-2xl hover:bg-slate-200 transition-colors"
-              >
-                <Images className="w-5 h-5" />
-                <span>Gallery</span>
-              </Link>
-              <Link
-                href="/processing"
-                className="flex items-center gap-2 px-4 py-2 bg-violet-600 text-white rounded-2xl hover:bg-violet-700 transition-colors"
-              >
-                <Workflow className="w-5 h-5" />
-                <span>Processing</span>
-              </Link>
-            </div>
-          </div>
-        </div>
-      </header>
+    <div className="h-screen w-screen bg-slate-950 text-white grid grid-cols-[460px_1fr] grid-rows-[auto_1fr] overflow-hidden">
+      {/* Header — spans full width */}
+      <div className="col-span-2">
+        <DashboardHeader />
+      </div>
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
-        {/* Status Bar - Camera + Controls */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-          <HealthMonitor />
-          <CameraControl />
+      {/* Left sidebar */}
+      <div className="overflow-y-auto border-r border-slate-800 p-4 space-y-4">
+        {/* Tab bar */}
+        <div className="flex bg-slate-900 rounded-xl p-1">
+          {tabs.map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${
+                activeTab === tab.key
+                  ? 'bg-teal-600 text-white'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left Column - Capture / Color Checker */}
-          <div className="space-y-4">
-            {/* Tabs */}
-            <div className="flex bg-slate-100 rounded-xl p-1">
-              <button
-                onClick={() => setActiveTab('capture')}
-                className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  activeTab === 'capture'
-                    ? 'bg-white text-slate-800 shadow-sm'
-                    : 'text-slate-600 hover:text-slate-800'
-                }`}
-              >
-                <Camera className="w-4 h-4" />
-                Capture
-              </button>
-              <button
-                onClick={() => setActiveTab('colorchecker')}
-                className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  activeTab === 'colorchecker'
-                    ? 'bg-white text-slate-800 shadow-sm'
-                    : 'text-slate-600 hover:text-slate-800'
-                }`}
-              >
-                <Palette className="w-4 h-4" />
-                Color Checker
-              </button>
-            </div>
+        {/* Tab content */}
+        {activeTab === 'single' && <CaptureForm />}
+        {activeTab === 'color' && <ColorCheckerForm />}
+        {activeTab === 'batch' && <BatchCaptureForm />}
 
-            {/* Panel Content */}
-            {activeTab === 'capture' ? <CapturePanel /> : <ColorCheckerPanel />}
-          </div>
+        {/* Divider */}
+        <div className="border-t border-slate-800" />
 
-          {/* Middle + Right Column - Stream & Settings */}
-          <div className="lg:col-span-2 space-y-6">
-            <StreamViewer />
-            <CameraSettings />
-          </div>
-        </div>
-      </main>
+        {/* Light Control — always visible */}
+        <LightControlPanel
+          lights={lights}
+          connected={connected}
+          wsConnected={wsConnected}
+          setLight={setLight}
+          setAllLights={setAllLights}
+          requestState={requestState}
+        />
+      </div>
 
-      {/* Footer */}
-      <footer className="bg-white border-t border-slate-200/60 mt-12">
-        <div className="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
-          <p className="text-center text-sm text-slate-500">
-            Camera Control API - FastAPI + Next.js
-          </p>
-        </div>
-      </footer>
+      {/* Right content */}
+      <div className="overflow-y-auto p-4 space-y-4">
+        {showLiveView ? <LiveViewPanel /> : <CompactCameraSettings />}
+      </div>
     </div>
   );
 }

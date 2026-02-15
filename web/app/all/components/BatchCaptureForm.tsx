@@ -42,8 +42,10 @@ interface BatchResult {
 }
 
 export default function BatchCaptureForm() {
-  const [folder, setFolder] = useState(`batch_${Date.now()}`);
-  const [prefix, setPrefix] = useState('capture');
+  const defaultFolder = `batch_${Date.now()}`;
+  const [folder, setFolder] = useState(defaultFolder);
+  const [prefix, setPrefix] = useState(defaultFolder);
+  const [prefixTouched, setPrefixTouched] = useState(false);
   const [lightDelay, setLightDelay] = useState(2.0);
 
   const [isRunning, setIsRunning] = useState(false);
@@ -132,6 +134,31 @@ export default function BatchCaptureForm() {
     };
   }, []);
 
+  useEffect(() => {
+    const handleSave = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+        e.preventDefault();
+        if (!isRunning && !result) {
+          startBatchCapture();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleSave);
+    return () => window.removeEventListener('keydown', handleSave);
+  });
+
+  const handleFolderChange = (value: string) => {
+    setFolder(value);
+    if (!prefixTouched) {
+      setPrefix(value);
+    }
+  };
+
+  const handlePrefixChange = (value: string) => {
+    setPrefixTouched(true);
+    setPrefix(value);
+  };
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'waiting_light':
@@ -165,7 +192,7 @@ export default function BatchCaptureForm() {
             <input
               type="text"
               value={folder}
-              onChange={(e) => setFolder(e.target.value)}
+              onChange={(e) => handleFolderChange(e.target.value)}
               className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 text-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 focus:outline-none"
               placeholder="batch_001"
             />
@@ -178,7 +205,7 @@ export default function BatchCaptureForm() {
             <input
               type="text"
               value={prefix}
-              onChange={(e) => setPrefix(e.target.value)}
+              onChange={(e) => handlePrefixChange(e.target.value)}
               className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 text-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 focus:outline-none"
               placeholder="capture"
             />
@@ -351,8 +378,11 @@ export default function BatchCaptureForm() {
         <div className="flex gap-2">
           <button
             onClick={() => {
+              const newFolder = `batch_${Date.now()}`;
               setResult(null);
-              setFolder(`batch_${Date.now()}`);
+              setFolder(newFolder);
+              setPrefix(newFolder);
+              setPrefixTouched(false);
             }}
             className="flex-1 py-2 text-sm font-medium bg-teal-600 text-white rounded-lg hover:bg-teal-500 transition-colors"
           >

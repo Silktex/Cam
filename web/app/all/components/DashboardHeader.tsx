@@ -8,12 +8,17 @@ import {
   troubleshootCamera,
   type CameraStatus,
 } from '@/lib/api';
-import { Camera, Power, Settings, Loader2, Wrench } from 'lucide-react';
-import { useState } from 'react';
+import { Camera, Power, Settings, Loader2, Wrench, Images, Workflow, Keyboard } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { usePathname } from 'next/navigation';
+import Link from 'next/link';
+import ShortcutsModal from './ShortcutsModal';
 
 export default function DashboardHeader() {
   const queryClient = useQueryClient();
+  const pathname = usePathname();
   const [message, setMessage] = useState<string | null>(null);
+  const [showShortcuts, setShowShortcuts] = useState(false);
 
   const { data: status } = useQuery({
     queryKey: ['camera', 'status'],
@@ -58,6 +63,51 @@ export default function DashboardHeader() {
     disconnectMutation.isPending ||
     troubleshootMutation.isPending;
 
+  const toggleShortcuts = useCallback(() => setShowShortcuts((v) => !v), []);
+
+  const handleToggleConnection = useCallback(() => {
+    if (isPending) return;
+    if (isConnected) {
+      disconnectMutation.mutate();
+    } else {
+      connectMutation.mutate();
+    }
+  }, [isConnected, isPending, connectMutation, disconnectMutation]);
+
+  const handleTroubleshoot = useCallback(() => {
+    if (isPending) return;
+    troubleshootMutation.mutate();
+  }, [isPending, troubleshootMutation]);
+
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      // Cmd/Ctrl shortcuts — work even in inputs
+      if (e.metaKey || e.ctrlKey) {
+        if (e.key === 'c') {
+          e.preventDefault();
+          handleToggleConnection();
+          return;
+        }
+        if (e.key === 't') {
+          e.preventDefault();
+          handleTroubleshoot();
+          return;
+        }
+        return;
+      }
+
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (e.key === '?') {
+        e.preventDefault();
+        toggleShortcuts();
+      }
+    };
+
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [toggleShortcuts, handleToggleConnection, handleTroubleshoot]);
+
   return (
     <div>
       {/* Row 1: Title + connection status */}
@@ -69,7 +119,41 @@ export default function DashboardHeader() {
             <p className="text-xs text-slate-400">{model} via gphoto2</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          <Link
+            href="/"
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+              pathname === '/' || pathname === '/all'
+                ? 'bg-teal-600/20 text-teal-400'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            <Camera className="w-4 h-4" />
+            Dashboard
+          </Link>
+          <Link
+            href="/gallery"
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+              pathname === '/gallery'
+                ? 'bg-teal-600/20 text-teal-400'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            <Images className="w-4 h-4" />
+            Gallery
+          </Link>
+          <Link
+            href="/processing"
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+              pathname?.startsWith('/processing')
+                ? 'bg-violet-600/20 text-violet-400'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            <Workflow className="w-4 h-4" />
+            Processing
+          </Link>
+          <div className="w-px h-5 bg-slate-700" />
           <span
             className={`w-2.5 h-2.5 rounded-full ${
               isConnected ? 'bg-teal-400 animate-pulse' : 'bg-red-400'
@@ -97,11 +181,7 @@ export default function DashboardHeader() {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() =>
-              isConnected
-                ? disconnectMutation.mutate()
-                : connectMutation.mutate()
-            }
+            onClick={handleToggleConnection}
             disabled={isPending}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 ${
               isConnected
@@ -117,7 +197,7 @@ export default function DashboardHeader() {
             {isConnected ? 'Disconnect' : 'Connect'}
           </button>
           <button
-            onClick={() => troubleshootMutation.mutate()}
+            onClick={handleTroubleshoot}
             disabled={isPending}
             title="Troubleshoot camera connection"
             className="p-1.5 text-slate-400 hover:text-slate-200 rounded-lg hover:bg-slate-800 transition-colors disabled:opacity-50"
@@ -129,6 +209,13 @@ export default function DashboardHeader() {
             )}
           </button>
           <button
+            onClick={toggleShortcuts}
+            className="p-1.5 text-slate-400 hover:text-slate-200 rounded-lg hover:bg-slate-800 transition-colors"
+            title="Keyboard Shortcuts (?)"
+          >
+            <Keyboard className="w-4 h-4" />
+          </button>
+          <button
             className="p-1.5 text-slate-400 hover:text-slate-200 rounded-lg hover:bg-slate-800 transition-colors"
             title="Settings"
           >
@@ -136,6 +223,8 @@ export default function DashboardHeader() {
           </button>
         </div>
       </div>
+
+      <ShortcutsModal open={showShortcuts} onClose={() => setShowShortcuts(false)} />
     </div>
   );
 }

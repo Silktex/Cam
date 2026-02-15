@@ -22,7 +22,8 @@ import {
 export default function CaptureForm() {
   const queryClient = useQueryClient();
   const [folder, setFolder] = useState('session_1');
-  const [prefix, setPrefix] = useState('capture');
+  const [prefix, setPrefix] = useState('session_1');
+  const [prefixTouched, setPrefixTouched] = useState(false);
   const [count, setCount] = useState(1);
   const [lastCapture, setLastCapture] = useState<CaptureResponse | null>(null);
   const [cooldown, setCooldown] = useState(0);
@@ -74,8 +75,31 @@ export default function CaptureForm() {
   });
 
   const handleCapture = () => {
-    if (!isConnected || cooldown > 0) return;
+    if (!isConnected || cooldown > 0 || captureMutation.isPending) return;
     captureMutation.mutate({ folder, prefix, count });
+  };
+
+  useEffect(() => {
+    const handleSave = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+        e.preventDefault();
+        handleCapture();
+      }
+    };
+    window.addEventListener('keydown', handleSave);
+    return () => window.removeEventListener('keydown', handleSave);
+  });
+
+  const handleFolderChange = (value: string) => {
+    setFolder(value);
+    if (!prefixTouched) {
+      setPrefix(value);
+    }
+  };
+
+  const handlePrefixChange = (value: string) => {
+    setPrefixTouched(true);
+    setPrefix(value);
   };
 
   const isCapturing = captureMutation.isPending;
@@ -110,7 +134,7 @@ export default function CaptureForm() {
           <input
             type="text"
             value={folder}
-            onChange={(e) => setFolder(e.target.value)}
+            onChange={(e) => handleFolderChange(e.target.value)}
             placeholder="session_1"
             disabled={isCapturing}
             className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 text-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 focus:outline-none disabled:opacity-50"
@@ -128,7 +152,7 @@ export default function CaptureForm() {
           <input
             type="text"
             value={prefix}
-            onChange={(e) => setPrefix(e.target.value)}
+            onChange={(e) => handlePrefixChange(e.target.value)}
             placeholder="capture"
             disabled={isCapturing}
             className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 text-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 focus:outline-none disabled:opacity-50"

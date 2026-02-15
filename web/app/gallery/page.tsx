@@ -4,11 +4,16 @@ import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
-  Folder, FileImage, ArrowLeft, ChevronRight, Home, X,
+  Folder, FileImage, ChevronRight, Home, X,
   ZoomIn, ZoomOut, RotateCcw, Download, Loader2, Image as ImageIcon, Trash2,
   RefreshCw, CheckCircle2
 } from 'lucide-react';
 import { browsePath, getMediaUrl, deleteFolder, deleteFile, reconvertTiff } from '@/lib/api';
+import dynamic from 'next/dynamic';
+
+const DashboardHeader = dynamic(() => import('../all/components/DashboardHeader'), {
+  ssr: false,
+});
 
 interface BreadcrumbItem {
   name: string;
@@ -39,8 +44,8 @@ interface BrowseResponse {
 export default function GalleryPage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen bg-cloud flex items-center justify-center">
-        <div className="flex items-center gap-3 text-slate-500">
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <div className="flex items-center gap-3 text-slate-400">
           <Loader2 className="w-6 h-6 animate-spin" />
           <span>Loading gallery...</span>
         </div>
@@ -112,6 +117,30 @@ function GalleryContent() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [viewerOpen, viewerIndex, viewerImages]);
+
+  // Global navigation shortcuts
+  useEffect(() => {
+    const handleNavKey = (e: KeyboardEvent) => {
+      if (viewerOpen) return;
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+      switch (e.key) {
+        case 'd':
+          router.push('/');
+          break;
+        case 'p':
+          router.push('/processing');
+          break;
+        case 'g':
+          // already on gallery
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleNavKey);
+    return () => window.removeEventListener('keydown', handleNavKey);
+  }, [router, viewerOpen]);
 
   const navigateTo = (path: string) => {
     router.push(`/gallery${path ? `?path=${encodeURIComponent(path)}` : ''}`);
@@ -257,10 +286,13 @@ function GalleryContent() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-cloud flex items-center justify-center">
-        <div className="flex items-center gap-3 text-slate-500">
-          <Loader2 className="w-6 h-6 animate-spin" />
-          <span>Loading gallery...</span>
+      <div className="min-h-screen bg-slate-950">
+        <DashboardHeader />
+        <div className="flex items-center justify-center py-24">
+          <div className="flex items-center gap-3 text-slate-400">
+            <Loader2 className="w-6 h-6 animate-spin" />
+            <span>Loading gallery...</span>
+          </div>
         </div>
       </div>
     );
@@ -268,15 +300,18 @@ function GalleryContent() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-cloud flex items-center justify-center">
-        <div className="bg-red-50 border border-red-200 rounded-2xl p-6 max-w-md text-center">
-          <p className="text-red-700 mb-4">{error}</p>
-          <button
-            onClick={fetchData}
-            className="px-4 py-2 bg-red-600 text-white rounded-xl hover:bg-red-700"
-          >
-            Retry
-          </button>
+      <div className="min-h-screen bg-slate-950">
+        <DashboardHeader />
+        <div className="flex items-center justify-center py-24">
+          <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-6 max-w-md text-center">
+            <p className="text-red-400 mb-4">{error}</p>
+            <button
+              onClick={fetchData}
+              className="px-4 py-2 bg-red-600 text-white rounded-xl hover:bg-red-700"
+            >
+              Retry
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -293,24 +328,21 @@ function GalleryContent() {
   const hasRawFolder = data?.items.some(i => i.type === 'folder' && i.name === 'raw') || false;
 
   return (
-    <div className="min-h-screen bg-cloud">
-      {/* Header */}
-      <header className="bg-white border-b border-slate-200/60 sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-slate-950 text-white">
+      {/* Shared Nav */}
+      <div className="sticky top-0 z-10">
+        <DashboardHeader />
+      </div>
+
+      {/* Gallery sub-header */}
+      <div className="border-b border-slate-800 bg-slate-900/60">
+        <div className="max-w-7xl mx-auto px-4 py-3 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <Link
-                href="/"
-                className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 transition-colors"
-              >
-                <ArrowLeft className="w-5 h-5 text-slate-600" />
-              </Link>
-              <div>
-                <h1 className="text-xl font-semibold text-slate-800">Gallery</h1>
-                <p className="text-sm text-slate-500">
-                  {visibleItems.filter(i => i.type === 'folder').length} folders, {visibleItems.filter(i => i.type === 'file').length} files
-                </p>
-              </div>
+            <div>
+              <h2 className="text-lg font-semibold text-white">Gallery</h2>
+              <p className="text-sm text-slate-400">
+                {visibleItems.filter(i => i.type === 'folder').length} folders, {visibleItems.filter(i => i.type === 'file').length} files
+              </p>
             </div>
             <div className="flex items-center gap-2">
               {hasRawFolder && (
@@ -329,7 +361,7 @@ function GalleryContent() {
                     Reconvert TIFFs
                   </button>
                   {reconvertResult && (
-                    <span className={`text-sm ${reconvertResult.success ? 'text-green-600' : 'text-red-600'} inline-flex items-center gap-1`}>
+                    <span className={`text-sm ${reconvertResult.success ? 'text-green-400' : 'text-red-400'} inline-flex items-center gap-1`}>
                       {reconvertResult.success ? <CheckCircle2 className="w-4 h-4" /> : null}
                       {reconvertResult.message}
                     </span>
@@ -340,16 +372,16 @@ function GalleryContent() {
           </div>
 
           {/* Breadcrumbs */}
-          <nav className="flex items-center gap-1 mt-4 text-sm overflow-x-auto pb-1">
+          <nav className="flex items-center gap-1 mt-3 text-sm overflow-x-auto pb-1">
             {data?.breadcrumbs.map((crumb, idx) => (
               <div key={crumb.path || 'root'} className="flex items-center gap-1 flex-shrink-0">
-                {idx > 0 && <ChevronRight className="w-4 h-4 text-slate-400" />}
+                {idx > 0 && <ChevronRight className="w-4 h-4 text-slate-500" />}
                 <button
                   onClick={() => navigateTo(crumb.path)}
                   className={`flex items-center gap-1 px-2 py-1 rounded-lg transition-colors ${
                     idx === (data?.breadcrumbs.length || 0) - 1
-                      ? 'bg-teal-100 text-teal-700 font-medium'
-                      : 'text-slate-600 hover:bg-slate-100'
+                      ? 'bg-teal-600/20 text-teal-400 font-medium'
+                      : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
                   }`}
                 >
                   {idx === 0 && <Home className="w-4 h-4" />}
@@ -359,7 +391,7 @@ function GalleryContent() {
             ))}
           </nav>
         </div>
-      </header>
+      </div>
 
       {/* Content */}
       <main className="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
@@ -379,7 +411,7 @@ function GalleryContent() {
             {visibleItems.map((item) => (
               <div
                 key={item.path}
-                className="group relative bg-white border border-slate-200 rounded-2xl overflow-hidden transition-all hover:shadow-lg hover:border-teal-300"
+                className="group relative bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden transition-all hover:border-teal-500/50"
               >
                 {/* Thumbnail / Icon */}
                 <div
@@ -390,14 +422,14 @@ function GalleryContent() {
                       openViewer(item, imageItems);
                     }
                   }}
-                  className={`aspect-square bg-slate-50 flex items-center justify-center overflow-hidden ${
+                  className={`aspect-square bg-slate-800/50 flex items-center justify-center overflow-hidden ${
                     item.type === 'folder' || item.is_image ? 'cursor-pointer' : ''
                   }`}
                 >
                   {item.type === 'folder' ? (
                     <div className="flex flex-col items-center">
                       <Folder className="w-14 h-14 text-teal-500" />
-                      <span className="text-xs text-slate-500 mt-1">{item.file_count} files</span>
+                      <span className="text-xs text-slate-400 mt-1">{item.file_count} files</span>
                     </div>
                   ) : item.is_image && item.thumbnail_url ? (
                     <img
@@ -407,15 +439,15 @@ function GalleryContent() {
                       loading="lazy"
                     />
                   ) : item.is_image ? (
-                    <ImageIcon className="w-12 h-12 text-slate-300" />
+                    <ImageIcon className="w-12 h-12 text-slate-600" />
                   ) : (
-                    <FileImage className="w-12 h-12 text-slate-300" />
+                    <FileImage className="w-12 h-12 text-slate-600" />
                   )}
                 </div>
 
                 {/* Info */}
                 <div className="p-3">
-                  <p className="text-sm font-medium text-slate-800 truncate" title={item.name}>
+                  <p className="text-sm font-medium text-slate-200 truncate" title={item.name}>
                     {item.name}
                   </p>
                   <p className="text-xs text-slate-500 mt-0.5">
@@ -447,28 +479,28 @@ function GalleryContent() {
 
       {/* Confirmation Modal */}
       {confirmModal.open && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full mx-4 overflow-hidden">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-xl max-w-sm w-full mx-4 overflow-hidden">
             <div className="p-6">
               <div className="flex items-center gap-3 mb-4">
-                <div className="p-2 rounded-full bg-red-100">
-                  <Trash2 className="w-5 h-5 text-red-600" />
+                <div className="p-2 rounded-full bg-red-500/20">
+                  <Trash2 className="w-5 h-5 text-red-400" />
                 </div>
-                <h3 className="text-lg font-semibold text-slate-800">
+                <h3 className="text-lg font-semibold text-white">
                   Delete {confirmModal.type === 'folder' ? 'Folder' : 'File'}
                 </h3>
               </div>
-              <p className="text-slate-600 text-sm">
+              <p className="text-slate-300 text-sm">
                 {confirmModal.type === 'folder'
                   ? <>Are you sure you want to delete <strong>{confirmModal.name}</strong> and all its contents? This cannot be undone.</>
                   : <>Are you sure you want to delete <strong>{confirmModal.name}</strong>? This cannot be undone.</>
                 }
               </p>
             </div>
-            <div className="flex border-t border-slate-200">
+            <div className="flex border-t border-slate-700">
               <button
                 onClick={() => setConfirmModal(m => ({ ...m, open: false }))}
-                className="flex-1 px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+                className="flex-1 px-4 py-3 text-sm font-medium text-slate-300 hover:bg-slate-800 transition-colors"
               >
                 Cancel
               </button>

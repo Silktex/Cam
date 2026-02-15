@@ -577,6 +577,28 @@ export default function CropPage() {
 
   const dims = getCropDimensions();
 
+  // Keyboard shortcuts: A → auto-detect, Cmd+S / Ctrl+S → apply
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+        e.preventDefault();
+        if (!processing && points.length === 4) handleApply();
+        return;
+      }
+
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (e.metaKey || e.ctrlKey) return;
+
+      if (e.key === 'a' || e.key === 'A') {
+        e.preventDefault();
+        if (!processing) handleAutoDetect();
+      }
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  });
+
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center">

@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
-  ArrowLeft, RefreshCw, Crop, Palette, Layers, ChevronRight,
+  RefreshCw, Crop, Palette, Layers, ChevronRight,
   CheckCircle2, Clock, Loader2, Camera, Image as ImageIcon,
   Settings, FolderOpen, AlertCircle, X, Check, Wand2, Move
 } from 'lucide-react';
@@ -17,6 +18,11 @@ import {
   Batch, BatchSummary, BatchImage, CropPoint
 } from '@/lib/api';
 import CropEditor from './components/CropEditor';
+import dynamic from 'next/dynamic';
+
+const DashboardHeader = dynamic(() => import('../all/components/DashboardHeader'), {
+  ssr: false,
+});
 
 type Phase = 'crop' | 'calibration' | 'pbr';
 type Status = 'pending' | 'in_progress' | 'completed';
@@ -34,6 +40,7 @@ const statusConfig: Record<Status, { label: string; icon: any; color: string; an
 };
 
 export default function ProcessingPage() {
+  const router = useRouter();
   const [batches, setBatches] = useState<Batch[]>([]);
   const [summary, setSummary] = useState<BatchSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -99,6 +106,29 @@ export default function ProcessingPage() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Global navigation shortcuts
+  useEffect(() => {
+    const handleNavKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+      switch (e.key) {
+        case 'd':
+          router.push('/');
+          break;
+        case 'g':
+          router.push('/gallery');
+          break;
+        case 'p':
+          // already on processing
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleNavKey);
+    return () => window.removeEventListener('keydown', handleNavKey);
+  }, [router]);
 
   const handleSync = async () => {
     setSyncing(true);
@@ -373,7 +403,15 @@ export default function ProcessingPage() {
     setProcessResult(null);
 
     try {
-      const res = await generatePBR(selectedBatch.name, pbrMode);
+      const selectedImages = batchImages
+        .filter(img => img.pbr_selected)
+        .map(img => img.filename);
+
+      const res = await generatePBR(
+        selectedBatch.name,
+        pbrMode,
+        selectedImages.length > 0 ? selectedImages : undefined
+      );
       const data = res.data;
 
       setProcessResult({
@@ -443,31 +481,31 @@ export default function ProcessingPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-teal-600" />
+      <div className="min-h-screen bg-slate-950">
+        <DashboardHeader />
+        <div className="flex items-center justify-center py-24">
+          <Loader2 className="w-8 h-8 animate-spin text-teal-400" />
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      {/* Header */}
-      <header className="bg-white border-b border-slate-200/60 sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-slate-950 text-white">
+      {/* Shared Nav */}
+      <div className="sticky top-0 z-10">
+        <DashboardHeader />
+      </div>
+
+      {/* Processing sub-header */}
+      <div className="border-b border-slate-800 bg-slate-900/60">
+        <div className="max-w-7xl mx-auto px-4 py-3 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <Link
-                href="/"
-                className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 transition-colors"
-              >
-                <ArrowLeft className="w-5 h-5 text-slate-600" />
-              </Link>
-              <div>
-                <h1 className="text-xl font-semibold text-slate-800">Processing Pipeline</h1>
-                <p className="text-sm text-slate-500">
-                  {summary?.total_batches || 0} batches
-                </p>
-              </div>
+            <div>
+              <h2 className="text-lg font-semibold text-white">Processing Pipeline</h2>
+              <p className="text-sm text-slate-400">
+                {summary?.total_batches || 0} batches
+              </p>
             </div>
             <button
               onClick={handleSync}
@@ -479,13 +517,13 @@ export default function ProcessingPage() {
             </button>
           </div>
         </div>
-      </header>
+      </div>
 
       <main className="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
         {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-2xl flex items-center gap-3">
-            <AlertCircle className="w-5 h-5 text-red-500" />
-            <span className="text-red-700">{error}</span>
+          <div className="mb-6 p-4 bg-red-500/10 border border-red-500/30 rounded-2xl flex items-center gap-3">
+            <AlertCircle className="w-5 h-5 text-red-400" />
+            <span className="text-red-400">{error}</span>
           </div>
         )}
 
@@ -502,7 +540,7 @@ export default function ProcessingPage() {
               return (
                 <div
                   key={phase}
-                  className="bg-white border border-slate-200 rounded-2xl p-5 cursor-pointer hover:border-teal-300 transition-colors"
+                  className="bg-slate-900 border border-slate-800 rounded-2xl p-5 cursor-pointer hover:border-teal-500/50 transition-colors"
                   onClick={() => {
                     setFilterPhase(phase);
                     setFilterStatus('all');
@@ -510,17 +548,17 @@ export default function ProcessingPage() {
                 >
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2">
-                      <div className={`p-2 rounded-xl bg-${config.color}-100`}>
-                        <Icon className={`w-5 h-5 text-${config.color}-600`} />
+                      <div className={`p-2 rounded-xl bg-${config.color}-500/20`}>
+                        <Icon className={`w-5 h-5 text-${config.color}-400`} />
                       </div>
-                      <span className="font-medium text-slate-800">{config.label}</span>
+                      <span className="font-medium text-slate-200">{config.label}</span>
                     </div>
-                    <span className="text-sm text-slate-500">
+                    <span className="text-sm text-slate-400">
                       {stats.completed}/{total}
                     </span>
                   </div>
 
-                  <div className="h-2 bg-slate-100 rounded-full overflow-hidden mb-3">
+                  <div className="h-2 bg-slate-800 rounded-full overflow-hidden mb-3">
                     <div
                       className="h-full bg-teal-500 transition-all"
                       style={{ width: `${progress}%` }}
@@ -534,7 +572,7 @@ export default function ProcessingPage() {
                         setFilterPhase(phase);
                         setFilterStatus('pending');
                       }}
-                      className="text-slate-500 hover:text-slate-700"
+                      className="text-slate-400 hover:text-slate-200"
                     >
                       {stats.pending} pending
                     </button>
@@ -544,7 +582,7 @@ export default function ProcessingPage() {
                         setFilterPhase(phase);
                         setFilterStatus('in_progress');
                       }}
-                      className="text-blue-500 hover:text-blue-700"
+                      className="text-blue-400 hover:text-blue-300"
                     >
                       {stats.in_progress} active
                     </button>
@@ -554,7 +592,7 @@ export default function ProcessingPage() {
                         setFilterPhase(phase);
                         setFilterStatus('completed');
                       }}
-                      className="text-green-500 hover:text-green-700"
+                      className="text-green-400 hover:text-green-300"
                     >
                       {stats.completed} done
                     </button>
@@ -567,14 +605,14 @@ export default function ProcessingPage() {
 
         {/* Filters */}
         <div className="flex items-center gap-4 mb-6">
-          <span className="text-sm text-slate-500">Filter:</span>
+          <span className="text-sm text-slate-400">Filter:</span>
           <div className="flex gap-2">
             <button
               onClick={() => { setFilterPhase('all'); setFilterStatus('all'); }}
               className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${
                 filterPhase === 'all' && filterStatus === 'all'
-                  ? 'bg-teal-100 text-teal-700'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  ? 'bg-teal-600/20 text-teal-400'
+                  : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
               }`}
             >
               All
@@ -585,8 +623,8 @@ export default function ProcessingPage() {
                 onClick={() => { setFilterPhase(phase); setFilterStatus('all'); }}
                 className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${
                   filterPhase === phase
-                    ? 'bg-teal-100 text-teal-700'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    ? 'bg-teal-600/20 text-teal-400'
+                    : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
                 }`}
               >
                 {phaseConfig[phase].label}
@@ -594,36 +632,36 @@ export default function ProcessingPage() {
             ))}
           </div>
           {filterStatus !== 'all' && (
-            <span className="text-sm text-slate-400">
+            <span className="text-sm text-slate-500">
               → {statusConfig[filterStatus].label}
             </span>
           )}
         </div>
 
         {/* Batch List */}
-        <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
           <table className="w-full">
-            <thead className="bg-slate-50 border-b border-slate-200">
+            <thead className="bg-slate-800/50 border-b border-slate-700">
               <tr>
-                <th className="text-left px-4 py-3 text-sm font-medium text-slate-600">Batch</th>
-                <th className="text-center px-4 py-3 text-sm font-medium text-slate-600">Images</th>
-                <th className="text-center px-4 py-3 text-sm font-medium text-slate-600">
+                <th className="text-left px-4 py-3 text-sm font-medium text-slate-400">Batch</th>
+                <th className="text-center px-4 py-3 text-sm font-medium text-slate-400">Images</th>
+                <th className="text-center px-4 py-3 text-sm font-medium text-slate-400">
                   <Crop className="w-4 h-4 inline mr-1" />
                   Crop
                 </th>
-                <th className="text-center px-4 py-3 text-sm font-medium text-slate-600">
+                <th className="text-center px-4 py-3 text-sm font-medium text-slate-400">
                   <Palette className="w-4 h-4 inline mr-1" />
                   Calibration
                 </th>
-                <th className="text-center px-4 py-3 text-sm font-medium text-slate-600">
+                <th className="text-center px-4 py-3 text-sm font-medium text-slate-400">
                   <Layers className="w-4 h-4 inline mr-1" />
                   PBR
                 </th>
-                <th className="text-right px-4 py-3 text-sm font-medium text-slate-600">Synced</th>
+                <th className="text-right px-4 py-3 text-sm font-medium text-slate-400">Synced</th>
                 <th className="px-4 py-3"></th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-slate-800">
               {filteredBatches.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-4 py-12 text-center text-slate-500">
@@ -634,22 +672,22 @@ export default function ProcessingPage() {
                 filteredBatches.map((batch) => (
                   <tr
                     key={batch.id}
-                    className="hover:bg-slate-50 cursor-pointer transition-colors"
+                    className="hover:bg-slate-800/50 cursor-pointer transition-colors"
                     onClick={() => openBatchDetail(batch)}
                   >
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
-                        <FolderOpen className="w-4 h-4 text-slate-400" />
-                        <span className="font-medium text-slate-800">{batch.name}</span>
+                        <FolderOpen className="w-4 h-4 text-slate-500" />
+                        <span className="font-medium text-slate-200">{batch.name}</span>
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-center text-sm text-slate-600">
+                    <td className="px-4 py-3 text-center text-sm text-slate-400">
                       {batch.image_count}
                     </td>
                     <td className="px-4 py-3 text-center">
                       {getStatusBadge(batch.crop_status)}
                       {batch.crop_type && (
-                        <span className="ml-1 text-xs text-slate-400">({batch.crop_type})</span>
+                        <span className="ml-1 text-xs text-slate-500">({batch.crop_type})</span>
                       )}
                     </td>
                     <td className="px-4 py-3 text-center">
@@ -658,14 +696,14 @@ export default function ProcessingPage() {
                     <td className="px-4 py-3 text-center">
                       {getStatusBadge(batch.pbr_status)}
                       {batch.pbr_mode && (
-                        <span className="ml-1 text-xs text-slate-400">({batch.pbr_mode})</span>
+                        <span className="ml-1 text-xs text-slate-500">({batch.pbr_mode})</span>
                       )}
                     </td>
                     <td className="px-4 py-3 text-right text-sm text-slate-500">
                       {formatDate(batch.synced_at)}
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <ChevronRight className="w-4 h-4 text-slate-400" />
+                      <ChevronRight className="w-4 h-4 text-slate-500" />
                     </td>
                   </tr>
                 ))
@@ -695,23 +733,23 @@ export default function ProcessingPage() {
       {/* Interactive Crop Modal with 4-point selection and rotation */}
       {showCropModal && selectedBatch && topImage && (
         <div className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-full max-w-5xl h-[90vh] overflow-hidden flex flex-col">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-5xl h-[90vh] overflow-hidden flex flex-col">
             {/* Modal Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-700 shrink-0">
               <div>
-                <h2 className="text-lg font-semibold text-slate-800">
+                <h2 className="text-lg font-semibold text-white">
                   Crop Images - {selectedBatch.name}
                 </h2>
-                <p className="text-sm text-slate-500">
+                <p className="text-sm text-slate-400">
                   Click 4 corners (1→2→3→4) or drag points. Use rotation slider for precise angle.
                 </p>
               </div>
               <button
                 onClick={() => setShowCropModal(false)}
-                className="p-2 rounded-lg hover:bg-slate-100 transition-colors"
+                className="p-2 rounded-lg hover:bg-slate-800 transition-colors"
                 disabled={processing === 'crop'}
               >
-                <X className="w-5 h-5 text-slate-500" />
+                <X className="w-5 h-5 text-slate-400" />
               </button>
             </div>
 
@@ -784,21 +822,21 @@ export default function ProcessingPage() {
 
       {/* Calibration Modal */}
       {showCalibrationModal && selectedBatch && (
-        <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md p-6">
-            <h3 className="text-lg font-semibold text-slate-800 mb-4">
+        <div className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md p-6">
+            <h3 className="text-lg font-semibold text-white mb-4">
               Color Calibration - {selectedBatch.name}
             </h3>
 
             <div className="mb-4">
-              <label className="block text-sm font-medium text-slate-700 mb-2">
+              <label className="block text-sm font-medium text-slate-300 mb-2">
                 ColorChecker Profile
               </label>
               {profiles.length > 0 ? (
                 <select
                   value={selectedProfile}
                   onChange={(e) => setSelectedProfile(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200"
                 >
                   <option value="">Select a profile...</option>
                   {profiles.map((p) => (
@@ -806,7 +844,7 @@ export default function ProcessingPage() {
                   ))}
                 </select>
               ) : (
-                <p className="text-sm text-slate-500 p-3 bg-slate-50 rounded-lg">
+                <p className="text-sm text-slate-400 p-3 bg-slate-800 rounded-lg">
                   No ColorChecker profiles found. Create one by detecting a ColorChecker in an image first.
                 </p>
               )}
@@ -815,7 +853,7 @@ export default function ProcessingPage() {
             <div className="flex gap-2 justify-end">
               <button
                 onClick={() => setShowCalibrationModal(false)}
-                className="px-4 py-2 bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200"
+                className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl hover:bg-slate-700"
               >
                 Cancel
               </button>
@@ -837,14 +875,14 @@ export default function ProcessingPage() {
 
       {/* PBR Modal */}
       {showPBRModal && selectedBatch && (
-        <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md p-6">
-            <h3 className="text-lg font-semibold text-slate-800 mb-4">
+        <div className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md p-6">
+            <h3 className="text-lg font-semibold text-white mb-4">
               PBR Generation - {selectedBatch.name}
             </h3>
 
             <div className="mb-4">
-              <label className="block text-sm font-medium text-slate-700 mb-2">Mode</label>
+              <label className="block text-sm font-medium text-slate-300 mb-2">Mode</label>
               <div className="space-y-2">
                 {(['grayscale', 'colored', 'both'] as const).map((mode) => (
                   <button
@@ -852,8 +890,8 @@ export default function ProcessingPage() {
                     onClick={() => setPbrMode(mode)}
                     className={`w-full px-4 py-3 rounded-xl text-left transition-colors ${
                       pbrMode === mode
-                        ? 'bg-amber-100 text-amber-700 border-2 border-amber-500'
-                        : 'bg-slate-100 text-slate-600 border-2 border-transparent hover:bg-slate-200'
+                        ? 'bg-amber-500/20 text-amber-400 border-2 border-amber-500'
+                        : 'bg-slate-800 text-slate-300 border-2 border-transparent hover:bg-slate-700'
                     }`}
                   >
                     <span className="font-medium capitalize">{mode}</span>
@@ -870,7 +908,7 @@ export default function ProcessingPage() {
             <div className="flex gap-2 justify-end">
               <button
                 onClick={() => setShowPBRModal(false)}
-                className="px-4 py-2 bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200"
+                className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl hover:bg-slate-700"
               >
                 Cancel
               </button>
@@ -892,46 +930,46 @@ export default function ProcessingPage() {
 
       {/* Batch Detail Modal */}
       {selectedBatch && !showCropModal && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
             {/* Modal Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-700">
               <div>
-                <h2 className="text-lg font-semibold text-slate-800">{selectedBatch.name}</h2>
-                <p className="text-sm text-slate-500">
+                <h2 className="text-lg font-semibold text-white">{selectedBatch.name}</h2>
+                <p className="text-sm text-slate-400">
                   {selectedBatch.image_count} images • Created {formatDate(selectedBatch.created_at)}
                 </p>
               </div>
               <button
                 onClick={closeBatchDetail}
-                className="p-2 rounded-lg hover:bg-slate-100 transition-colors"
+                className="p-2 rounded-lg hover:bg-slate-800 transition-colors"
               >
-                <X className="w-5 h-5 text-slate-500" />
+                <X className="w-5 h-5 text-slate-400" />
               </button>
             </div>
 
             {/* Phase Status */}
-            <div className="px-6 py-4 bg-slate-50 border-b border-slate-200">
+            <div className="px-6 py-4 bg-slate-800/50 border-b border-slate-700">
               <div className="flex gap-6">
                 <div className="flex items-center gap-2">
-                  <Crop className="w-4 h-4 text-slate-500" />
-                  <span className="text-sm text-slate-600">Crop:</span>
+                  <Crop className="w-4 h-4 text-slate-400" />
+                  <span className="text-sm text-slate-300">Crop:</span>
                   {getStatusBadge(selectedBatch.crop_status)}
                   {selectedBatch.crop_type && (
-                    <span className="text-xs text-slate-400">({selectedBatch.crop_type})</span>
+                    <span className="text-xs text-slate-500">({selectedBatch.crop_type})</span>
                   )}
                 </div>
                 <div className="flex items-center gap-2">
-                  <Palette className="w-4 h-4 text-slate-500" />
-                  <span className="text-sm text-slate-600">Calibration:</span>
+                  <Palette className="w-4 h-4 text-slate-400" />
+                  <span className="text-sm text-slate-300">Calibration:</span>
                   {getStatusBadge(selectedBatch.calibration_status)}
                 </div>
                 <div className="flex items-center gap-2">
-                  <Layers className="w-4 h-4 text-slate-500" />
-                  <span className="text-sm text-slate-600">PBR:</span>
+                  <Layers className="w-4 h-4 text-slate-400" />
+                  <span className="text-sm text-slate-300">PBR:</span>
                   {getStatusBadge(selectedBatch.pbr_status)}
                   {selectedBatch.pbr_mode && (
-                    <span className="text-xs text-slate-400">({selectedBatch.pbr_mode})</span>
+                    <span className="text-xs text-slate-500">({selectedBatch.pbr_mode})</span>
                   )}
                 </div>
               </div>
@@ -941,17 +979,17 @@ export default function ProcessingPage() {
             <div className="flex-1 overflow-auto p-6">
               {loadingDetail ? (
                 <div className="flex items-center justify-center py-12">
-                  <Loader2 className="w-6 h-6 animate-spin text-teal-600" />
+                  <Loader2 className="w-6 h-6 animate-spin text-teal-400" />
                 </div>
               ) : (
                 <div className="grid grid-cols-3 gap-4">
                   {batchImages.map((image) => (
                     <div
                       key={image.id}
-                      className="border border-slate-200 rounded-xl overflow-hidden"
+                      className="border border-slate-700 rounded-xl overflow-hidden bg-slate-800/50"
                     >
                       {/* Thumbnail - show cropped_thumbnail after crop is completed */}
-                      <div className="aspect-square bg-slate-100 relative">
+                      <div className="aspect-square bg-slate-800 relative">
                         <img
                           src={`${getMediaUrl(`${selectedBatch.name}/${selectedBatch.crop_status === 'completed' ? 'cropped_thumbnail' : 'thumbnail'}/${image.filename.replace(/\.[^.]+$/, '.jpg')}`)}?t=${selectedBatch.crop_completed_at || ''}`}
                           alt={image.filename}
@@ -970,7 +1008,7 @@ export default function ProcessingPage() {
                           className={`absolute top-2 right-2 p-1 rounded-full transition-colors ${
                             image.pbr_selected
                               ? 'bg-teal-500 text-white'
-                              : 'bg-white/80 text-slate-400 hover:bg-white'
+                              : 'bg-slate-700/80 text-slate-400 hover:bg-slate-600'
                           }`}
                           title={image.pbr_selected ? 'Selected for PBR' : 'Excluded from PBR'}
                         >
@@ -998,10 +1036,10 @@ export default function ProcessingPage() {
 
                       {/* Image Info */}
                       <div className="p-3 text-xs">
-                        <p className="font-medium text-slate-700 truncate" title={image.filename}>
+                        <p className="font-medium text-slate-200 truncate" title={image.filename}>
                           {image.filename}
                         </p>
-                        <div className="mt-1 text-slate-500 space-y-0.5">
+                        <div className="mt-1 text-slate-400 space-y-0.5">
                           <p>{image.camera}</p>
                           <p>{image.resolution_w} × {image.resolution_h}</p>
                           <p>ISO {image.iso} • {image.aperture} • {image.shutter}</p>
@@ -1014,7 +1052,7 @@ export default function ProcessingPage() {
             </div>
 
             {/* Action Buttons */}
-            <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex justify-between">
+            <div className="px-6 py-4 border-t border-slate-700 bg-slate-800/50 flex justify-between">
               <div className="flex gap-2">
                 <Link
                   href={`/processing/crop/${selectedBatch.name}`}
@@ -1045,7 +1083,7 @@ export default function ProcessingPage() {
               </div>
               <button
                 onClick={closeBatchDetail}
-                className="px-4 py-2 bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200 transition-colors"
+                className="px-4 py-2 bg-slate-700 text-slate-300 rounded-xl hover:bg-slate-600 transition-colors"
               >
                 Close
               </button>

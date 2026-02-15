@@ -208,10 +208,15 @@ export const calibrateBatch = (batchName: string, profileName?: string, colorche
 export const getCalibrationPreview = (batchName: string) =>
   api.get(`/api/processing/calibrate/preview/${batchName}`);
 
-export const generatePBR = (batchName: string, mode: 'grayscale' | 'colored' | 'both' = 'grayscale') =>
+export const generatePBR = (
+  batchName: string,
+  mode: 'grayscale' | 'colored' | 'both' = 'grayscale',
+  selectedImages?: string[]
+) =>
   api.post('/api/processing/pbr', {
     batch_name: batchName,
     mode,
+    selected_images: selectedImages,
   });
 
 export const getPBRPreview = (batchName: string) =>
