@@ -18,7 +18,8 @@ node_modules/
 
 # Database
 *.sqlite3
+*.db
 
 # Media (optional - uncomment to ignore captured files)
-api/media/captures/
+api/media/
 api/data/

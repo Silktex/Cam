@@ -27,19 +27,49 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan - startup and shutdown"""
     logger.info("Starting Camera Control API...")
-    
-    # Startup: Check camera on boot
+
+    # ── Camera detection ──
+    camera_info = {"detected": False}
     try:
-        camera_service.startup_check()
+        camera_info = camera_service.startup_check()
     except Exception as e:
         logger.warning(f"Startup camera check failed: {e}")
-    
-    # Startup: Connect to ESP32 light controller
+
+    # ── ESP32 light controller ──
+    esp_info = {"host": settings.ESP32_HOST, "connected": False}
     try:
-        await light_service.connect()
+        esp_info = await light_service.connect()
     except Exception as e:
         logger.warning(f"ESP32 light controller connection failed: {e}")
-    
+
+    # ── Startup summary ──
+    logger.info("=" * 60)
+    logger.info("  STARTUP DEVICE STATUS")
+    logger.info("-" * 60)
+
+    if camera_info.get("detected"):
+        logger.info(f"  Camera : DETECTED")
+        logger.info(f"           Model -> {camera_info.get('model', 'unknown')}")
+        logger.info(f"           Port  -> {camera_info.get('port', 'unknown')}")
+    else:
+        logger.warning(f"  Camera : NOT DETECTED — no USB camera found")
+        if camera_info.get("error"):
+            logger.warning(f"           Error -> {camera_info['error']}")
+
+    esp_host = esp_info.get("host", settings.ESP32_HOST)
+    if esp_info.get("connected"):
+        logger.info(f"  ESP32  : CONNECTED at http://{esp_host}")
+        logger.info(f"           Lights -> {esp_info.get('lights', '?')} configured")
+    else:
+        logger.warning(f"  ESP32  : NOT REACHABLE at http://{esp_host}")
+        if esp_info.get("http_status"):
+            logger.warning(f"           HTTP status -> {esp_info['http_status']}")
+        elif esp_info.get("error"):
+            logger.warning(f"           Error -> {esp_info['error']}")
+        logger.warning(f"           Running in simulation mode (lights tracked locally)")
+
+    logger.info("=" * 60)
+
     yield
     
     # Shutdown: Disconnect camera

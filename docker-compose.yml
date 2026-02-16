@@ -1,4 +1,10 @@
 services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
   camera-system:
     build:
       context: .
@@ -11,12 +17,30 @@ services:
     volumes:
       - ${MEDIA_PATH:-./camera-images}:/app/api/media
       - ${DATA_PATH:-./camera-data}:/app/api/data
+      # Bind-mount (not devices:) so hot-plugged USB cameras appear live
+      - /dev/bus/usb:/dev/bus/usb
     environment:
       - DEBUG=false
       - ESP32_HOST=192.168.0.44
       - USE_GPU=false
-    devices:
-      - /dev/bus/usb:/dev/bus/usb
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
     privileged: true
+    depends_on:
+      - redis
     restart: unless-stopped
 
+  celery-worker:
+    build:
+      context: .
+    command: celery -A app.celery_app worker --loglevel=info --concurrency=2
+    working_dir: /app/api
+    volumes:
+      - ${MEDIA_PATH:-./camera-images}:/app/api/media
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - ESP32_HOST=192.168.0.44
+    depends_on:
+      - redis
+    restart: unless-stopped

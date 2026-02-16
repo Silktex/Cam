@@ -39,12 +39,22 @@ class Settings(BaseSettings):
     LIGHT_NAMES: str = "Top Light,Side 1 Light,Side 2 Light,Side 3 Light,Side 4 Light,Side 5 Light,Side 6 Light,Side 7 Light,Side 8 Light"
     LIGHT_PINS: str = "26,25,5,19,21,4,13,12,27"
     
-    # macOS PTP daemons to kill
+    # Celery / Redis
+    CELERY_BROKER_URL: str = "redis://localhost:6379/0"
+    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/0"
+
+    # macOS PTP daemons that grab the camera USB
     PTP_PROCESSES: List[str] = [
         "PTPCamera",
-        "ptpcamerad", 
+        "ptpcamerad",
         "mscamerad-xpc",
         "cameracaptured",
+    ]
+
+    # Linux (Debian/Docker) processes that grab the camera USB
+    LINUX_USB_PROCESSES: List[str] = [
+        "gvfs-gphoto2-volume-monitor",
+        "gvfsd-gphoto2",
     ]
     
     @property

@@ -557,23 +557,32 @@ class CalibrationService:
         b64 = base64.b64encode(png_bytes).decode('utf-8')
         return f"data:image/png;base64,{b64}"
 
-    def save_profile(self, data: ColorCheckerData, name: str) -> str:
+    def save_profile(self, data: ColorCheckerData, name: str, overwrite: bool = False) -> str:
         """
         Save ColorChecker detection data as NPZ profile.
 
         Args:
             data: ColorCheckerData from detection
             name: Profile name (alphanumeric + underscore)
+            overwrite: If True, overwrite existing profile; else auto-version (_v2, _v3, …)
 
         Returns:
             Path to saved profile
         """
         # Sanitize name
-        safe_name = "".join(c for c in name if c.isalnum() or c == '_')
+        safe_name = "".join(c for c in name if c.isalnum() or c in ('_', '-'))
         if not safe_name:
             safe_name = f"profile_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
         profile_path = self.profiles_dir / f"{safe_name}.npz"
+
+        # Auto-version when not overwriting
+        if not overwrite and profile_path.exists():
+            version = 2
+            while (self.profiles_dir / f"{safe_name}_v{version}.npz").exists():
+                version += 1
+            safe_name = f"{safe_name}_v{version}"
+            profile_path = self.profiles_dir / f"{safe_name}.npz"
 
         # Derive checker RAW path from source TIFF path
         source_path = Path(data.source_image)
@@ -622,9 +631,9 @@ class CalibrationService:
         logger.info("=" * 80)
         return str(profile_path)
 
-    def save_colorchecker_profile(self, data: ColorCheckerData, name: str) -> str:
+    def save_colorchecker_profile(self, data: ColorCheckerData, name: str, overwrite: bool = False) -> str:
         """Alias for save_profile for backward compatibility."""
-        return self.save_profile(data, name)
+        return self.save_profile(data, name, overwrite=overwrite)
 
     def load_profile(self, name: str) -> Optional[ColorCheckerData]:
         """
@@ -705,6 +714,7 @@ class CalibrationService:
                         "path": str(npz_file),
                         "created_at": str(data.get('created_at', 'unknown')),
                         "source_image": str(data.get('source_image', '')),
+                        "checker_raw_path": str(data.get('checker_raw_path', '')),
                         "checker_type": str(data.get('checker_type', 'ColorChecker24')),
                     })
             except Exception as e:

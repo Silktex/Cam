@@ -239,8 +239,8 @@ export const getAvailableCheckerImages = () =>
 export const getBatchesWithRaw = () =>
   api.get('/api/colorchecker/batches-with-raw');
 
-export const captureColorChecker = () =>
-  api.post('/api/colorchecker/capture');
+export const captureColorChecker = (profileName?: string, overwrite?: boolean) =>
+  api.post('/api/colorchecker/capture', { profile_name: profileName || null, overwrite: overwrite ?? false });
 
 export const uploadColorChecker = (file: File) => {
   const formData = new FormData();
@@ -265,8 +265,8 @@ export const rotateColorChecker = (detectionId: string, degrees: number) =>
 export const getColorCheckerOverlay = (detectionId: string) =>
   `${API_BASE_URL}/api/colorchecker/overlay/${detectionId}`;
 
-export const saveColorCheckerProfile = (detectionId: string, profileName: string) =>
-  api.post('/api/colorchecker/save', { detection_id: detectionId, profile_name: profileName });
+export const saveColorCheckerProfile = (detectionId: string, profileName: string, overwrite?: boolean) =>
+  api.post('/api/colorchecker/save', { detection_id: detectionId, profile_name: profileName, overwrite: overwrite ?? false });
 
 export const listColorCheckerProfiles = () =>
   api.get('/api/colorchecker/profiles');

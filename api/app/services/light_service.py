@@ -40,38 +40,46 @@ class LightControllerService:
                 brightness=100
             )
 
-    async def connect(self) -> bool:
-        """Initialize HTTP session and check ESP32 connectivity."""
+    async def connect(self) -> dict:
+        """Initialize HTTP session and check ESP32 connectivity.
+
+        Returns dict with connection details for startup reporting.
+        """
+        host = settings.ESP32_HOST
+        result = {"host": host, "connected": False, "lights": len(self.lights)}
         try:
             self._session = aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=5)
             )
-            
+
             # Test connection by fetching the ESP32 page
-            async with self._session.get(f"http://{settings.ESP32_HOST}/") as resp:
+            async with self._session.get(f"http://{host}/") as resp:
                 if resp.status == 200:
                     self.connected = True
-                    logger.info(f"Connected to ESP32 at {settings.ESP32_HOST}")
+                    result["connected"] = True
+                    logger.info(f"Connected to ESP32 at {host}")
                 else:
                     self.connected = False
+                    result["http_status"] = resp.status
                     logger.warning(f"ESP32 returned status {resp.status}")
-            
+
             # Fetch initial light states from ESP32
             if self.connected:
                 await self._poll_esp32_states()
-            
+
             # Start background polling task
             self._start_polling()
-            
+
             # Broadcast connection status
             await self._broadcast_state()
-            return True
+            return result
 
         except Exception as e:
             logger.warning(f"Could not connect to ESP32: {e}")
             logger.info("Running in simulation mode - states tracked locally")
             self.connected = False
-            return False
+            result["error"] = str(e)
+            return result
 
     def _start_polling(self):
         """Start background polling task."""

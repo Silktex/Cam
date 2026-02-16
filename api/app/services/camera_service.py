@@ -7,6 +7,7 @@ import gphoto2 as gp
 import subprocess
 import time
 import logging
+import platform
 import threading
 import atexit
 import signal
@@ -64,9 +65,18 @@ class CameraService:
     # =========== Process Management ===========
     
     def kill_ptp_processes(self) -> List[str]:
-        """Kill macOS PTP daemons that grab the camera USB"""
+        """Kill OS-specific processes that grab the camera USB.
+
+        macOS: PTPCamera, ptpcamerad, mscamerad-xpc, cameracaptured
+        Linux: gvfs-gphoto2-volume-monitor, gvfsd-gphoto2
+        """
+        if platform.system() == "Darwin":
+            targets = settings.PTP_PROCESSES
+        else:
+            targets = settings.LINUX_USB_PROCESSES
+
         killed = []
-        for proc in settings.PTP_PROCESSES:
+        for proc in targets:
             try:
                 result = subprocess.run(
                     ["killall", "-9", proc],
@@ -77,16 +87,18 @@ class CameraService:
                     killed.append(proc)
             except Exception:
                 pass
-        
+
         if killed:
+            logger.info(f"Killed USB-grabbing processes: {killed}")
             time.sleep(0.3)
-        
+
         return killed
-    
+
     def reset_usb(self) -> bool:
-        """Reset USB device using gphoto2 --reset"""
+        """Reset USB device — tries gphoto2 --reset first, then
+        falls back to ioctl USBDEVFS_RESET on Linux."""
+        # 1. Try gphoto2 --reset (works on both platforms)
         try:
-            # First try gphoto2 reset
             result = subprocess.run(
                 ["gphoto2", "--reset"],
                 capture_output=True,
@@ -95,13 +107,66 @@ class CameraService:
             )
             logger.info(f"USB reset via gphoto2: {result.returncode == 0}")
             time.sleep(1)
-            return result.returncode == 0
+            if result.returncode == 0:
+                return True
         except Exception as e:
-            logger.warning(f"USB reset failed: {e}")
+            logger.warning(f"gphoto2 reset failed: {e}")
+
+        # 2. Linux fallback: ioctl USB reset on the device node
+        if platform.system() == "Linux":
+            return self._usb_reset_ioctl()
+
+        return False
+
+    def _usb_reset_ioctl(self) -> bool:
+        """Reset USB device via ioctl on Linux.
+
+        Parses the bus/device from gphoto2 --auto-detect output
+        (e.g. usb:001,004) and issues USBDEVFS_RESET on
+        /dev/bus/usb/001/004.  Requires privileged container or
+        appropriate permissions.
+        """
+        import fcntl
+
+        try:
+            info = self.detect_camera_info()
+            port = info.get("port", "")  # e.g. "usb:001,004"
+            if not port or not port.startswith("usb:"):
+                logger.warning("Cannot determine USB bus/device for ioctl reset")
+                return False
+
+            bus_dev = port.replace("usb:", "").split(",")
+            if len(bus_dev) != 2:
+                logger.warning(f"Unexpected USB port format: {port}")
+                return False
+
+            dev_path = f"/dev/bus/usb/{bus_dev[0]}/{bus_dev[1]}"
+            logger.info(f"Attempting ioctl USB reset on {dev_path}")
+
+            USBDEVFS_RESET = 21780  # _IO('U', 20)
+            with open(dev_path, "w") as fd:
+                fcntl.ioctl(fd.fileno(), USBDEVFS_RESET, 0)
+
+            logger.info(f"ioctl USB reset successful: {dev_path}")
+            time.sleep(1)
+            return True
+        except PermissionError:
+            logger.warning("ioctl USB reset failed: permission denied (container needs privileged mode)")
+            return False
+        except FileNotFoundError as e:
+            logger.warning(f"ioctl USB reset failed: device node not found ({e})")
+            return False
+        except Exception as e:
+            logger.warning(f"ioctl USB reset failed: {e}")
             return False
     
     def detect_camera(self) -> bool:
         """Check if camera is detected via gphoto2 CLI"""
+        info = self.detect_camera_info()
+        return info.get("detected", False)
+
+    def detect_camera_info(self) -> Dict[str, Any]:
+        """Detect camera and return detailed info (model, port, etc.)"""
         try:
             result = subprocess.run(
                 ["gphoto2", "--auto-detect"],
@@ -109,21 +174,39 @@ class CameraService:
                 text=True,
                 timeout=10
             )
-            detected = "usb:" in result.stdout.lower()
-            logger.info(f"Camera detection: {'found' if detected else 'not found'}")
-            return detected
+            output = result.stdout
+            detected = "usb:" in output.lower()
+
+            model = None
+            port = None
+            if detected:
+                # Parse lines after the header separator
+                for line in output.splitlines():
+                    if "usb:" in line.lower():
+                        # Format: "Sony ILCE-7RM3 (Control)    usb:001,004"
+                        parts = line.rsplit("usb:", 1)
+                        model = parts[0].strip() if parts[0].strip() else None
+                        port = "usb:" + parts[1].strip() if len(parts) > 1 else None
+                        break
+
+            return {
+                "detected": detected,
+                "model": model,
+                "port": port,
+            }
         except Exception as e:
             logger.error(f"Camera detection failed: {e}")
-            return False
-    
-    def startup_check(self):
-        """Run at startup to log camera status"""
+            return {"detected": False, "model": None, "port": None, "error": str(e)}
+
+    def startup_check(self) -> Dict[str, Any]:
+        """Run at startup, return detection details for the startup banner"""
         self.kill_ptp_processes()
-        detected = self.detect_camera()
-        if detected:
-            logger.info("✓ Camera detected at startup")
+        info = self.detect_camera_info()
+        if info["detected"]:
+            logger.info(f"✓ Camera detected at startup: {info.get('model')} on {info.get('port')}")
         else:
             logger.warning("✗ No camera detected at startup")
+        return info
     
     # =========== Connection ===========
     
@@ -244,32 +327,53 @@ class CameraService:
         }
     
     def troubleshoot(self) -> Dict[str, Any]:
-        """Kill PTP processes, reset USB, and detect camera"""
+        """Kill USB-grabbing processes, reset USB, and detect camera.
+
+        Platform-aware: kills macOS PTP daemons or Linux gvfs processes,
+        and uses ioctl USB reset as fallback on Linux.
+        """
+        os_name = platform.system()  # "Darwin" or "Linux"
         with self._lock:
             self._stop_live_view.set()
             self._cleanup_camera()
-            
+
             # Kill processes
             killed = self.kill_ptp_processes()
             time.sleep(0.3)
-            
+
             # Reset USB device
             usb_reset = self.reset_usb()
             time.sleep(0.5)
-            
+
             # Kill again after reset (daemons may respawn)
             killed2 = self.kill_ptp_processes()
             killed.extend(killed2)
             time.sleep(0.3)
-            
-            detected = self.detect_camera()
-            
+
+            camera_info = self.detect_camera_info()
+            detected = camera_info.get("detected", False)
+
+            parts = []
+            parts.append(f"Platform: {os_name}.")
+            if killed:
+                parts.append(f"Killed {len(killed)} processes: {', '.join(killed)}.")
+            else:
+                parts.append("No USB-grabbing processes found to kill.")
+            parts.append(f"USB reset: {'success' if usb_reset else 'failed'}.")
+            if detected:
+                parts.append(f"Camera detected: {camera_info.get('model', 'unknown')} on {camera_info.get('port', 'unknown')}.")
+            else:
+                parts.append("Camera not detected after troubleshooting.")
+
             return {
                 "success": True,
+                "platform": os_name,
                 "killed_processes": killed,
                 "usb_reset": usb_reset,
                 "camera_detected": detected,
-                "message": f"Killed {len(killed)} processes. USB reset: {usb_reset}. Camera {'detected' if detected else 'not detected'}."
+                "camera_model": camera_info.get("model"),
+                "camera_port": camera_info.get("port"),
+                "message": " ".join(parts),
             }
     
     # =========== Settings ===========
@@ -382,13 +486,14 @@ class CameraService:
     
     # =========== Capture ===========
     
-    def capture_image(self, folder: str, prefix: str = "capture", suffix: str = "") -> Dict[str, Any]:
+    def capture_image(self, folder: str, prefix: str = "capture", suffix: str = "", skip_post_process: bool = False) -> Dict[str, Any]:
         """Capture a single image and save to folder/raw/ subfolder.
-        
+
         Args:
             folder: Capture session folder name
             prefix: Filename prefix (e.g., 'fabric')
             suffix: Suffix placed before extension (e.g., 'top', 'side_1')
+            skip_post_process: If True, skip inline post-processing (for batch capture with Celery)
         """
         # Stop live view first (outside lock to avoid deadlock)
         if self._live_view_active:
@@ -471,22 +576,26 @@ class CameraService:
                         logger.warning(f"Could not delete from camera: {del_err}")
                     
                     # Wait for camera to be ready for next operation
-                    time.sleep(0.5)
+                    time.sleep(0.1)
                     self._drain_camera_events()
                     
                     # Post-process: generate TIFF, thumbnail, full_webview
-                    processed = self._post_process_image(folder_path, local_filename, ext)
-                    
+                    processed = {}
+                    if not skip_post_process:
+                        processed = self._post_process_image(folder_path, local_filename, ext)
+
                     event_bus.publish(EventType.CAPTURE_COMPLETE, {
                         "filename": local_filename,
                         "folder": folder,
                         "size": file_size
                     })
-                    
+
                     return {
                         "success": True,
                         "filename": local_filename,
                         "filepath": str(local_path),
+                        "folder_path": str(folder_path),
+                        "ext": ext,
                         "file_url": f"/media/captures/{folder}/raw/{local_filename}",
                         "file_size": file_size,
                         "captured_at": datetime.now().isoformat(),
@@ -639,7 +748,7 @@ class CameraService:
                 break
         
         # Small extra delay for camera to fully stabilize
-        time.sleep(0.2)
+        time.sleep(0.1)
     
     # =========== Live View ===========
     

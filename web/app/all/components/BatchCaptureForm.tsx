@@ -47,6 +47,7 @@ export default function BatchCaptureForm() {
   const [prefix, setPrefix] = useState(defaultFolder);
   const [prefixTouched, setPrefixTouched] = useState(false);
   const [lightDelay, setLightDelay] = useState(2.0);
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
   const [isRunning, setIsRunning] = useState(false);
   const [progress, setProgress] = useState<BatchProgress | null>(null);
@@ -134,6 +135,22 @@ export default function BatchCaptureForm() {
     };
   }, []);
 
+  // Auto-focus folder input on mount
+  useEffect(() => {
+    folderInputRef.current?.focus();
+    folderInputRef.current?.select();
+  }, []);
+
+  // Listen for global 'F' shortcut to re-focus folder input
+  useEffect(() => {
+    const handleFocus = () => {
+      folderInputRef.current?.focus();
+      folderInputRef.current?.select();
+    };
+    window.addEventListener('focusFolderInput', handleFocus);
+    return () => window.removeEventListener('focusFolderInput', handleFocus);
+  }, []);
+
   useEffect(() => {
     const handleSave = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 's') {
@@ -190,9 +207,15 @@ export default function BatchCaptureForm() {
               Folder Name
             </label>
             <input
+              ref={folderInputRef}
               type="text"
               value={folder}
               onChange={(e) => handleFolderChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  e.currentTarget.blur();
+                }
+              }}
               className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 text-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 focus:outline-none"
               placeholder="batch_001"
             />
@@ -206,6 +229,11 @@ export default function BatchCaptureForm() {
               type="text"
               value={prefix}
               onChange={(e) => handlePrefixChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  e.currentTarget.blur();
+                }
+              }}
               className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 text-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 focus:outline-none"
               placeholder="capture"
             />
@@ -219,6 +247,11 @@ export default function BatchCaptureForm() {
               type="number"
               value={lightDelay}
               onChange={(e) => setLightDelay(parseFloat(e.target.value))}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  e.currentTarget.blur();
+                }
+              }}
               min={0.5}
               max={10}
               step={0.5}

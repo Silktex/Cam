@@ -81,6 +81,7 @@ export default function ColorCheckerForm() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showServerBrowser, setShowServerBrowser] = useState(false);
   const [wbSourceBatch, setWbSourceBatch] = useState<string>('');
+  const [ifExists, setIfExists] = useState<'version' | 'overwrite'>('version');
 
   const { data: availableImages, refetch: refetchAvailable } = useQuery({
     queryKey: ['colorchecker', 'available-images'],
@@ -125,7 +126,7 @@ export default function ColorCheckerForm() {
   });
 
   const captureMutation = useMutation({
-    mutationFn: () => captureColorChecker(),
+    mutationFn: () => captureColorChecker(state.profileName || undefined, ifExists === 'overwrite'),
     onMutate: () => {
       setState((s) => ({ ...s, status: 'capturing', error: null }));
     },
@@ -253,7 +254,7 @@ export default function ColorCheckerForm() {
     }: {
       detectionId: string;
       name: string;
-    }) => saveColorCheckerProfile(detectionId, name),
+    }) => saveColorCheckerProfile(detectionId, name, ifExists === 'overwrite'),
     onMutate: () => {
       setState((s) => ({ ...s, status: 'saving' }));
     },
@@ -404,6 +405,53 @@ export default function ColorCheckerForm() {
             <span className="text-red-300">{state.error}</span>
           </div>
         )}
+
+        {/* Profile Name — set before capture so the image is named accordingly */}
+        <div>
+          <label className="block text-xs text-slate-400 mb-1">
+            Profile Name
+          </label>
+          <input
+            type="text"
+            value={state.profileName}
+            onChange={(e) =>
+              setState((s) => ({ ...s, profileName: e.target.value }))
+            }
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') e.currentTarget.blur();
+            }}
+            placeholder="my_calibration"
+            className="w-full px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white placeholder-slate-500 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 focus:outline-none"
+          />
+          {/* If exists behaviour */}
+          <div className="flex items-center gap-4 mt-1.5">
+            <span className="text-[10px] text-slate-500">If name exists:</span>
+            <label className="flex items-center gap-1 cursor-pointer">
+              <input
+                type="radio"
+                name="ifExists"
+                checked={ifExists === 'version'}
+                onChange={() => setIfExists('version')}
+                className="accent-teal-500 w-3 h-3"
+              />
+              <span className={`text-[11px] ${ifExists === 'version' ? 'text-teal-400' : 'text-slate-400'}`}>
+                Keep both
+              </span>
+            </label>
+            <label className="flex items-center gap-1 cursor-pointer">
+              <input
+                type="radio"
+                name="ifExists"
+                checked={ifExists === 'overwrite'}
+                onChange={() => setIfExists('overwrite')}
+                className="accent-orange-500 w-3 h-3"
+              />
+              <span className={`text-[11px] ${ifExists === 'overwrite' ? 'text-orange-400' : 'text-slate-400'}`}>
+                Overwrite
+              </span>
+            </label>
+          </div>
+        </div>
 
         {/* Capture + Upload + Browse Buttons */}
         <div className="grid grid-cols-3 gap-2">
@@ -558,32 +606,23 @@ export default function ColorCheckerForm() {
 
             {/* Save Profile */}
             <div className="pt-2 border-t border-slate-800">
-              <label className="block text-xs text-slate-400 mb-1">
-                Profile Name
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={state.profileName}
-                  onChange={(e) =>
-                    setState((s) => ({ ...s, profileName: e.target.value }))
-                  }
-                  placeholder="my_calibration"
-                  className="flex-1 px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white placeholder-slate-500 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 focus:outline-none"
-                />
-                <button
-                  onClick={handleSave}
-                  disabled={!state.profileName.trim() || isProcessing}
-                  className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                    !state.profileName.trim() || isProcessing
-                      ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                      : 'bg-teal-600 text-white hover:bg-teal-500'
-                  }`}
-                >
-                  <Save className="w-3.5 h-3.5" />
-                  Save
-                </button>
-              </div>
+              <button
+                onClick={handleSave}
+                disabled={!state.profileName.trim() || isProcessing}
+                className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  !state.profileName.trim() || isProcessing
+                    ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                    : 'bg-teal-600 text-white hover:bg-teal-500'
+                }`}
+              >
+                <Save className="w-3.5 h-3.5" />
+                Save Profile{state.profileName.trim() ? `: ${state.profileName.trim()}` : ''}
+              </button>
+              {!state.profileName.trim() && (
+                <p className="text-[10px] text-slate-500 mt-1 text-center">
+                  Enter a profile name above to save
+                </p>
+              )}
             </div>
 
             {/* Comparison toggle */}

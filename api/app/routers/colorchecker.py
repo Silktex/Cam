@@ -61,6 +61,7 @@ class RotateRequest(BaseModel):
 class SaveProfileRequest(BaseModel):
     detection_id: str
     profile_name: str
+    overwrite: bool = False
 
 
 class ProfileResponse(BaseModel):
@@ -137,16 +138,59 @@ async def list_batches_with_raw():
     return {"batches": batches}
 
 
+class CaptureRequest(BaseModel):
+    profile_name: Optional[str] = None
+    overwrite: bool = False
+
+
+def _path_to_url(abs_path: str) -> Optional[str]:
+    """Convert an absolute filesystem path to a /media/… URL, or None."""
+    if not abs_path:
+        return None
+    try:
+        rel = Path(abs_path).relative_to(settings.MEDIA_DIR)
+        return f"/media/{rel}"
+    except (ValueError, TypeError):
+        return None
+
+
+def _versioned_name(base_dir: Path, name: str, ext: str) -> str:
+    """Return *name* if base_dir/name.ext doesn't exist, else name_v2, _v3, …"""
+    if not (base_dir / f"{name}{ext}").exists():
+        return name
+    version = 2
+    while (base_dir / f"{name}_v{version}{ext}").exists():
+        version += 1
+    return f"{name}_v{version}"
+
+
 @router.post("/capture", response_model=CaptureResponse)
-async def capture_colorchecker():
+async def capture_colorchecker(request: CaptureRequest = CaptureRequest()):
     """
     Capture a ColorChecker image from the connected camera.
     Saves to media/colorchecker/captures/ folder.
     Returns TIFF file path for detection (not RAW).
+
+    If profile_name is provided it is used as the filename prefix;
+    a _v2 / _v3 suffix is added automatically when a file with that
+    name already exists.
     """
-    # Generate filename with timestamp
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"colorchecker_{timestamp}"
+    if request.profile_name and request.profile_name.strip():
+        safe = "".join(c for c in request.profile_name.strip() if c.isalnum() or c in ('_', '-'))
+    else:
+        safe = None
+
+    if safe:
+        if not request.overwrite:
+            # Version against existing TIFFs so re-captures don't overwrite
+            tiff_dir = settings.MEDIA_DIR / "colorchecker" / "captures" / "tiff"
+            tiff_dir.mkdir(parents=True, exist_ok=True)
+            filename = _versioned_name(tiff_dir, safe, ".tiff")
+        else:
+            filename = safe
+    else:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"colorchecker_{timestamp}"
 
     # Capture image using camera service (saves RAW + converts to TIFF)
     result = camera_service.capture_image(
@@ -497,13 +541,14 @@ async def save_profile(request: SaveProfileRequest):
     service = cached["service"]
 
     try:
-        profile_path = service.save_profile(checker_data, request.profile_name)
+        profile_path = service.save_profile(checker_data, request.profile_name, overwrite=request.overwrite)
+        saved_name = Path(profile_path).stem  # actual name (may include _v2 etc.)
 
         return {
             "success": True,
-            "profile_name": request.profile_name,
+            "profile_name": saved_name,
             "profile_path": profile_path,
-            "message": f"Profile '{request.profile_name}' saved successfully",
+            "message": f"Profile '{saved_name}' saved successfully",
         }
 
     except Exception as e:
@@ -524,6 +569,12 @@ async def list_profiles():
     try:
         service = CalibrationService()
         profiles = service.list_profiles()
+
+        # Enrich with URLs the frontend can use
+        for p in profiles:
+            p["source_image_url"] = _path_to_url(p.get("source_image", ""))
+            p["checker_raw_url"] = _path_to_url(p.get("checker_raw_path", ""))
+
         return {"profiles": profiles}
 
     except Exception as e:

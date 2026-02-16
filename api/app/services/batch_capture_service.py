@@ -92,43 +92,49 @@ class BatchCaptureService:
                 for side_id in self.SIDE_LIGHT_IDS
             ]
             
+            # Collect raw capture info for deferred post-processing
+            raw_captures = []
+
             # Process each light: ON → capture → OFF
             for step, light_info in enumerate(all_lights, start=1):
                 if self._state.should_cancel:
                     logger.info("Batch capture cancelled by user")
                     break
-                
+
                 self._state.current_step = step
                 light_id = light_info["id"]
                 light_name = light_info["name"]
                 suffix = light_info["suffix"]
-                
+
                 # Turn on current light
                 await self._set_light(light_id, on=True, brightness=100)
                 logger.info(f"{light_name} ON")
-                
+
                 # Report progress: waiting for light
                 await self._report_progress(
                     status="waiting_light",
                     message=f"Waiting {light_stabilize_delay}s for {light_name} to stabilize..."
                 )
-                
+
                 # Wait for light to stabilize
                 await asyncio.sleep(light_stabilize_delay)
-                
+
                 if self._state.should_cancel:
                     break
-                
+
                 # Report progress: capturing
                 await self._report_progress(
                     status="capturing",
                     message=f"Capturing with {light_name}..."
                 )
-                
-                # Capture image — suffix goes right before extension
+
+                # Capture image — skip inline post-processing (deferred to Celery)
                 try:
-                    result = camera_service.capture_image(folder=folder, prefix=prefix, suffix=suffix)
-                    
+                    result = camera_service.capture_image(
+                        folder=folder, prefix=prefix, suffix=suffix,
+                        skip_post_process=True,
+                    )
+
                     if result.get("success"):
                         capture_info = {
                             "step": step,
@@ -142,8 +148,15 @@ class BatchCaptureService:
                         }
                         self._state.captures.append(capture_info)
                         logger.info(f"Captured: {result.get('filename')}")
-                        
-                        # Report progress: processing
+
+                        # Collect info for deferred post-processing
+                        raw_captures.append({
+                            "folder_path": result.get("folder_path"),
+                            "raw_filename": result.get("filename"),
+                            "ext": result.get("ext"),
+                        })
+
+                        # Report progress
                         await self._report_progress(
                             status="processing",
                             message=f"Captured {light_name} ({step}/9)"
@@ -152,27 +165,42 @@ class BatchCaptureService:
                         error_msg = f"Capture failed for {light_name}: {result.get('error')}"
                         self._state.errors.append(error_msg)
                         logger.error(error_msg)
-                        
+
                         await self._report_progress(
                             status="error",
                             message=error_msg
                         )
-                        
+
                 except Exception as e:
                     error_msg = f"Capture exception for {light_name}: {str(e)}"
                     self._state.errors.append(error_msg)
                     logger.exception(error_msg)
-                
+
                 # Turn off current light before moving to next
                 await self._set_light(light_id, on=False)
                 logger.info(f"{light_name} OFF")
-                
+
                 # Small delay between captures for camera recovery
-                await asyncio.sleep(0.5)
-            
+                await asyncio.sleep(0.1)
+
             # Turn off all lights at the end
             logger.info("Batch capture complete, turning off all lights")
             await self._set_all_lights_off()
+
+            # Dispatch post-processing to Celery workers
+            if raw_captures:
+                from app.tasks.processing import post_process_image
+                for capture in raw_captures:
+                    post_process_image.delay(
+                        capture["folder_path"],
+                        capture["raw_filename"],
+                        capture["ext"],
+                    )
+                logger.info(f"Dispatched {len(raw_captures)} post-processing tasks to Celery")
+                await self._report_progress(
+                    status="post_processing_dispatched",
+                    message=f"Dispatched {len(raw_captures)} images for background processing"
+                )
             
             # Build result
             completed_at = datetime.now()

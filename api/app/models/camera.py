@@ -23,8 +23,11 @@ class CameraInfo(BaseModel):
 class TroubleshootResult(BaseModel):
     """Result from troubleshoot/kill processes"""
     success: bool
+    platform: Optional[str] = None
     killed_processes: List[str]
     camera_detected: bool
+    camera_model: Optional[str] = None
+    camera_port: Optional[str] = None
     message: str
 
 

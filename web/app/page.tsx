@@ -34,7 +34,7 @@ type Tab = 'single' | 'color' | 'batch';
 
 export default function Home() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<Tab>('single');
+  const [activeTab, setActiveTab] = useState<Tab>('batch');
   const [showLiveView, setShowLiveView] = useState(true);
   const {
     lights,
@@ -46,9 +46,9 @@ export default function Home() {
   } = useLightsWebSocket();
 
   const tabs: { key: Tab; label: string }[] = [
+    { key: 'batch', label: 'Batch' },
     { key: 'single', label: 'Single' },
     { key: 'color', label: 'Color' },
-    { key: 'batch', label: 'Batch' },
   ];
 
   // Keyboard shortcuts
@@ -68,9 +68,17 @@ export default function Home() {
           const anyOn = lights.some((l) => l.on);
           setAllLights(!anyOn);
           break;
+        case 't':
+        case 'T': {
+          // Top Light = lights[0]
+          const topLight = lights[0];
+          if (topLight) setLight(topLight.id, !topLight.on);
+          break;
+        }
         case '1': case '2': case '3': case '4':
         case '5': case '6': case '7': case '8': {
-          const idx = parseInt(e.key) - 1;
+          // Side N Light = lights[N] (key '1' → lights[1], etc.)
+          const idx = parseInt(e.key);
           const light = lights[idx];
           if (light) setLight(light.id, !light.on);
           break;
@@ -83,6 +91,10 @@ export default function Home() {
           break;
         case 'c':
           setActiveTab('color');
+          break;
+        case 'f':
+          // Focus folder name input in batch capture form
+          window.dispatchEvent(new Event('focusFolderInput'));
           break;
         case 'l':
           setShowLiveView((prev) => !prev);

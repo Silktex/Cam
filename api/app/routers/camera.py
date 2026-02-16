@@ -50,8 +50,11 @@ async def troubleshoot_camera():
     result = camera_service.troubleshoot()
     return TroubleshootResult(
         success=result["success"],
+        platform=result.get("platform"),
         killed_processes=result["killed_processes"],
         camera_detected=result["camera_detected"],
+        camera_model=result.get("camera_model"),
+        camera_port=result.get("camera_port"),
         message=result["message"],
     )
 

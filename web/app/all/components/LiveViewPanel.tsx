@@ -60,6 +60,13 @@ export default function LiveViewPanel() {
     }
   }, [isConnected]);
 
+  // Stop the backend live view stream on unmount
+  useEffect(() => {
+    return () => {
+      stopLiveView().catch(() => {});
+    };
+  }, []);
+
   const isStreaming = streamSrc !== null;
 
   return (
