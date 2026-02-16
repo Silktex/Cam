@@ -5,6 +5,7 @@ Orchestrates light control and camera capture for multi-light photography.
 import asyncio
 import logging
 from datetime import datetime
+from pathlib import Path
 from typing import List, Optional, Callable, Awaitable
 from dataclasses import dataclass, field
 
@@ -187,20 +188,32 @@ class BatchCaptureService:
             logger.info("Batch capture complete, turning off all lights")
             await self._set_all_lights_off()
 
-            # Dispatch post-processing to Celery workers
+            # Post-process: try Celery, fall back to inline
             if raw_captures:
-                from app.tasks.processing import post_process_image
-                for capture in raw_captures:
-                    post_process_image.delay(
-                        capture["folder_path"],
-                        capture["raw_filename"],
-                        capture["ext"],
+                try:
+                    from app.tasks.processing import post_process_image
+                    for capture in raw_captures:
+                        post_process_image.delay(
+                            capture["folder_path"],
+                            capture["raw_filename"],
+                            capture["ext"],
+                        )
+                    logger.info(f"Dispatched {len(raw_captures)} post-processing tasks to Celery")
+                    await self._report_progress(
+                        status="post_processing_dispatched",
+                        message=f"Dispatched {len(raw_captures)} images for background processing"
                     )
-                logger.info(f"Dispatched {len(raw_captures)} post-processing tasks to Celery")
-                await self._report_progress(
-                    status="post_processing_dispatched",
-                    message=f"Dispatched {len(raw_captures)} images for background processing"
-                )
+                except (ImportError, Exception) as e:
+                    logger.warning(f"Celery unavailable ({e}), running post-processing inline")
+                    for capture in raw_captures:
+                        try:
+                            camera_service._post_process_image(
+                                Path(capture["folder_path"]),
+                                capture["raw_filename"],
+                                capture["ext"],
+                            )
+                        except Exception as pp_err:
+                            logger.warning(f"Inline post-processing failed for {capture['raw_filename']}: {pp_err}")
             
             # Build result
             completed_at = datetime.now()

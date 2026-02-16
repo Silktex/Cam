@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { useLightsWebSocket } from '@/hooks/useLightsWebSocket';
+import { stopLiveView } from '@/lib/api';
 
 const DashboardHeader = dynamic(() => import('./all/components/DashboardHeader'), {
   ssr: false,
@@ -97,7 +98,13 @@ export default function Home() {
           window.dispatchEvent(new Event('focusFolderInput'));
           break;
         case 'l':
-          setShowLiveView((prev) => !prev);
+          setShowLiveView((prev) => {
+            if (prev) {
+              // Switching away from live view — stop the stream
+              stopLiveView().catch(() => {});
+            }
+            return !prev;
+          });
           break;
         case 'p':
           router.push('/processing');
@@ -162,7 +169,10 @@ export default function Home() {
 
       {/* Right content */}
       <div className="overflow-y-auto p-4 space-y-4">
-        {showLiveView ? <LiveViewPanel /> : <CompactCameraSettings />}
+        <div className={showLiveView ? '' : 'hidden'}>
+          <LiveViewPanel />
+        </div>
+        {!showLiveView && <CompactCameraSettings />}
       </div>
     </div>
   );
