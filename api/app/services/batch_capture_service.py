@@ -96,7 +96,11 @@ class BatchCaptureService:
             # Collect raw capture info for deferred post-processing
             raw_captures = []
 
-            # Process each light: ON → capture → OFF
+            # Process each light: ON → stabilize → capture → switch
+            # First light needs full stabilization; subsequent lights overlap
+            # by turning on the next light right after capture (before turning
+            # off the current one), so the stabilization delay runs in parallel.
+            prev_light_id = None
             for step, light_info in enumerate(all_lights, start=1):
                 if self._state.should_cancel:
                     logger.info("Batch capture cancelled by user")
@@ -107,8 +111,11 @@ class BatchCaptureService:
                 light_name = light_info["name"]
                 suffix = light_info["suffix"]
 
-                # Turn on current light
+                # Turn on current light (previous is turned off after)
                 await self._set_light(light_id, on=True, brightness=100)
+                # Turn off previous light now (overlap with stabilization)
+                if prev_light_id is not None:
+                    await self._set_light(prev_light_id, on=False)
                 logger.info(f"{light_name} ON")
 
                 # Report progress: waiting for light
@@ -129,7 +136,7 @@ class BatchCaptureService:
                     message=f"Capturing with {light_name}..."
                 )
 
-                # Capture image — skip inline post-processing (deferred to Celery)
+                # Capture image — post-processing deferred to background
                 try:
                     result = camera_service.capture_image(
                         folder=folder, prefix=prefix, suffix=suffix,
@@ -177,29 +184,40 @@ class BatchCaptureService:
                     self._state.errors.append(error_msg)
                     logger.exception(error_msg)
 
-                # Turn off current light before moving to next
-                await self._set_light(light_id, on=False)
-                logger.info(f"{light_name} OFF")
-
-                # Small delay between captures for camera recovery
-                await asyncio.sleep(0.1)
+                prev_light_id = light_id
 
             # Turn off all lights at the end
             logger.info("Batch capture complete, turning off all lights")
             await self._set_all_lights_off()
 
-            # Post-process captured RAW files inline (RAW → JPG)
+            # Defer RAW→JPG + calibrate+crop to background thread
             if raw_captures:
-                for capture in raw_captures:
+                import threading
+                def _background_post_process(captures, batch_folder):
+                    for capture in captures:
+                        try:
+                            camera_service._post_process_image(
+                                Path(capture["folder_path"]),
+                                capture["raw_filename"],
+                                capture["ext"],
+                            )
+                        except Exception as pp_err:
+                            logger.warning(f"Post-processing failed for {capture['raw_filename']}: {pp_err}")
+                    # Queue calibration + crop after JPGs are ready
                     try:
-                        camera_service._post_process_image(
-                            Path(capture["folder_path"]),
-                            capture["raw_filename"],
-                            capture["ext"],
-                        )
-                    except Exception as pp_err:
-                        logger.warning(f"Post-processing failed for {capture['raw_filename']}: {pp_err}")
-            
+                        from app.services.post_capture_service import post_capture_service
+                        post_capture_service.queue(batch_folder)
+                        logger.info(f"Queued calibrate+crop for {batch_folder}")
+                    except Exception as e:
+                        logger.warning(f"Failed to queue post-capture processing: {e}")
+
+                threading.Thread(
+                    target=_background_post_process,
+                    args=(raw_captures, folder),
+                    daemon=True,
+                ).start()
+                logger.info(f"RAW→JPG + calibrate+crop dispatched to background")
+
             # Build result
             completed_at = datetime.now()
             duration = (completed_at - self._state.started_at).total_seconds()

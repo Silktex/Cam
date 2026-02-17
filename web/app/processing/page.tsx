@@ -14,7 +14,7 @@ import {
   updatePBRSelection, getMediaUrl, getFullUrl,
   getTopImageForCrop, autoDetectCrop, previewManualCrop, applyCrop,
   calibrateBatch, getColorCheckerProfiles,
-  generatePBR,
+  generatePBR, getPostCaptureJobs,
   Batch, BatchSummary, BatchImage, CropPoint
 } from '@/lib/api';
 import CropEditor from './components/CropEditor';
@@ -87,6 +87,9 @@ export default function ProcessingPage() {
   // PBR settings
   const [pbrMode, setPbrMode] = useState<'grayscale' | 'colored' | 'both'>('grayscale');
 
+  // Post-capture background jobs
+  const [postCaptureJobs, setPostCaptureJobs] = useState<Record<string, any>>({});
+
   const fetchData = useCallback(async () => {
     try {
       const [batchRes, summaryRes] = await Promise.all([
@@ -103,9 +106,29 @@ export default function ProcessingPage() {
     }
   }, []);
 
+  const fetchPostCaptureJobs = useCallback(async () => {
+    try {
+      const res = await getPostCaptureJobs();
+      setPostCaptureJobs(res.data || {});
+    } catch {
+      // ignore — endpoint may not exist yet
+    }
+  }, []);
+
   useEffect(() => {
     fetchData();
-  }, [fetchData]);
+    fetchPostCaptureJobs();
+  }, [fetchData, fetchPostCaptureJobs]);
+
+  // Poll post-capture jobs while any are active
+  useEffect(() => {
+    const hasActive = Object.values(postCaptureJobs).some(
+      (j: any) => j.status === 'pending' || j.status === 'processing'
+    );
+    if (!hasActive) return;
+    const interval = setInterval(fetchPostCaptureJobs, 3000);
+    return () => clearInterval(interval);
+  }, [postCaptureJobs, fetchPostCaptureJobs]);
 
   // Global navigation shortcuts
   useEffect(() => {
@@ -600,6 +623,67 @@ export default function ProcessingPage() {
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* Post-capture background jobs */}
+        {Object.keys(postCaptureJobs).length > 0 && (
+          <div className="mb-6 bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
+            <div className="px-4 py-3 border-b border-slate-800 flex items-center gap-2">
+              <Palette className="w-4 h-4 text-violet-400" />
+              <span className="text-sm font-medium text-slate-200">Calibrate &amp; Crop Jobs</span>
+            </div>
+            <div className="divide-y divide-slate-800">
+              {Object.entries(postCaptureJobs).map(([batch, job]: [string, any]) => (
+                <div key={batch} className="px-4 py-3 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <FolderOpen className="w-4 h-4 text-slate-500" />
+                    <span className="text-sm font-medium text-slate-200">{batch}</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {job.status === 'processing' && (
+                      <span className="text-xs text-slate-400">
+                        {job.current_step === 'calibrating'
+                          ? `Calibrated ${job.calibrated_count}/9`
+                          : job.current_step === 'cropping'
+                            ? `Cropped ${job.cropped_count}/9`
+                            : job.current_step}
+                      </span>
+                    )}
+                    {job.status === 'completed' && (
+                      <span className="text-xs text-slate-400">
+                        {job.calibrated_count} calibrated, {job.cropped_count} cropped
+                      </span>
+                    )}
+                    {job.status === 'failed' && (
+                      <span className="text-xs text-red-400 max-w-[200px] truncate" title={job.error}>
+                        {job.error}
+                      </span>
+                    )}
+                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
+                      job.status === 'completed'
+                        ? 'bg-green-100 text-green-700'
+                        : job.status === 'failed'
+                          ? 'bg-red-100 text-red-700'
+                          : job.status === 'processing'
+                            ? 'bg-blue-100 text-blue-700'
+                            : 'bg-slate-100 text-slate-600'
+                    }`}>
+                      {(job.status === 'pending' || job.status === 'processing') && (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      )}
+                      {job.status === 'completed' && (
+                        <CheckCircle2 className="w-3 h-3" />
+                      )}
+                      {job.status === 'failed' && (
+                        <AlertCircle className="w-3 h-3" />
+                      )}
+                      {job.status}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

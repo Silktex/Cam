@@ -32,8 +32,7 @@ async def capture_images(request: CaptureRequest):
     success_count = 0
     
     for i in range(request.count):
-        prefix = f"{request.prefix}_{i+1}" if request.count > 1 else request.prefix
-        result = camera_service.capture_image(request.folder, prefix)
+        result = camera_service.capture_image(request.folder, request.prefix)
         
         if result["success"]:
             success_count += 1

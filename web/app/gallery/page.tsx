@@ -8,7 +8,7 @@ import {
   ZoomIn, ZoomOut, RotateCcw, Download, Loader2, Image as ImageIcon, Trash2,
   RefreshCw, CheckCircle2
 } from 'lucide-react';
-import { browsePath, getMediaUrl, deleteFolder, deleteFile, reconvertTiff } from '@/lib/api';
+import { browsePath, getMediaUrl, resolveImageUrl, deleteFolder, deleteFile, reconvertTiff } from '@/lib/api';
 import dynamic from 'next/dynamic';
 
 const DashboardHeader = dynamic(() => import('../all/components/DashboardHeader'), {
@@ -183,9 +183,9 @@ function GalleryContent() {
   };
 
   const getImageUrl = (item: GalleryItem, preferWebview = true) => {
-    // Use item.url which already points to cropped version when available (from backend)
+    // Use item.url which already points to the best display version (from backend)
     if (item.url) {
-      // item.url is like "/media/captures/batch/cropped/file.tiff" - strip prefix
+      if (item.url.startsWith('/api/')) return item.url;
       return item.url.replace('/media/captures/', '');
     }
     return item.path;
@@ -433,7 +433,7 @@ function GalleryContent() {
                     </div>
                   ) : item.is_image && item.thumbnail_url ? (
                     <img
-                      src={`${getMediaUrl(item.thumbnail_url.replace('/media/captures/', ''))}?t=${item.modified}`}
+                      src={`${resolveImageUrl(item.thumbnail_url)}${item.thumbnail_url.includes('?') ? '&' : '?'}t=${item.modified}`}
                       alt={item.name}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                       loading="lazy"
@@ -552,7 +552,7 @@ function GalleryContent() {
                 <RotateCcw className="w-5 h-5" />
               </button>
               <a
-                href={getMediaUrl(viewerImage.download_url?.replace('/media/captures/', '') || viewerImage.path)}
+                href={resolveImageUrl(viewerImage.download_url || `/media/captures/${viewerImage.path}`)}
                 download
                 className="p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors"
                 title="Download Cropped"
@@ -617,7 +617,11 @@ function GalleryContent() {
             >
               <img
                 key={viewerImage.path}
-                src={`${getMediaUrl(getImageUrl(viewerImage, true))}?t=${viewerImage.modified}`}
+                src={(() => {
+                  const imgUrl = getImageUrl(viewerImage, true);
+                  const base = imgUrl.startsWith('/api/') ? resolveImageUrl(imgUrl) : getMediaUrl(imgUrl);
+                  return `${base}${imgUrl.includes('?') ? '&' : '?'}t=${viewerImage.modified}`;
+                })()}
                 alt={viewerImage.name}
                 className="transition-transform select-none object-contain"
                 style={{
@@ -632,7 +636,8 @@ function GalleryContent() {
                   if (!target.dataset.fallback) {
                     target.dataset.fallback = 'true';
                     // Fallback to original path if cropped version fails
-                    target.src = `${getMediaUrl(viewerImage.url?.replace('/media/captures/', '') || viewerImage.path)}?t=${viewerImage.modified}`;
+                    const fallbackUrl = viewerImage.url || `/media/captures/${viewerImage.path}`;
+                    target.src = `${resolveImageUrl(fallbackUrl)}?t=${viewerImage.modified}`;
                   }
                 }}
               />

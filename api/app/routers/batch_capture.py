@@ -58,6 +58,52 @@ async def get_batch_status():
     return batch_capture_service.get_status()
 
 
+# ── Post-capture processing (calibrate + crop) ──
+
+from app.services.post_capture_service import post_capture_service
+
+
+@router.post("/process/{folder}")
+async def queue_processing(
+    folder: str,
+    profile: str = "CHECKER-17FEB.npz",
+    crop_size: int = 2048,
+):
+    """Manually queue calibrate+crop for a batch folder."""
+    try:
+        job = post_capture_service.queue(folder, profile=profile, crop_size=crop_size)
+        return {"success": True, "batch": folder, "status": job.status}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/process/{folder}")
+async def get_processing_status(folder: str):
+    """Get calibrate+crop processing status for a batch."""
+    job = post_capture_service.get_status(folder)
+    if job is None:
+        return {"batch": folder, "status": "none"}
+    return {
+        "batch": folder,
+        "status": job.status,
+        "current_step": job.current_step,
+        "calibrated_count": job.calibrated_count,
+        "cropped_count": job.cropped_count,
+        "error": job.error,
+        "queued_at": job.queued_at,
+        "started_at": job.started_at,
+        "completed_at": job.completed_at,
+    }
+
+
+@router.get("/process")
+async def list_processing_jobs():
+    """List all post-capture processing jobs."""
+    return post_capture_service.list_jobs()
+
+
 @router.websocket("/ws")
 async def batch_capture_websocket(websocket: WebSocket):
     """

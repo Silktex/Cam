@@ -364,17 +364,16 @@ async def detect_colorchecker(request: DetectRequest):
         logger.info(f"  WB-matched image: shape={image_override.shape} range=[{image_override.min():.4f}, {image_override.max():.4f}]")
 
     elif is_raw and not request.wb_source_batch:
-        # RAW file without WB source — find corresponding TIFF or JPEG
-        logger.info(f"RAW file detected, looking for TIFF/JPEG alternative")
-        tiff_path = image_path.parent.parent / "tiff" / f"{image_path.stem}.tiff"
-        if tiff_path.exists():
-            image_path = tiff_path
-            logger.info(f"Using TIFF: {tiff_path}")
-        else:
-            jpeg_path = image_path.parent.parent / "full_webview" / f"{image_path.stem}.jpg"
-            if jpeg_path.exists():
-                image_path = jpeg_path
-                logger.info(f"Using JPEG: {jpeg_path}")
+        # RAW file without WB source — decode directly with rawpy (16-bit linear)
+        if not image_path.exists():
+            raise HTTPException(status_code=404, detail=f"RAW file not found: {image_path}")
+        from scripts.processing.raw_utils import load_raw
+        logger.info(f"RAW file detected, decoding directly with rawpy")
+        rgb_16 = load_raw(image_path)
+        if rgb_16 is None:
+            raise HTTPException(status_code=500, detail=f"Failed to decode RAW: {image_path.name}")
+        image_override = rgb_16.astype(np.float32) / 65535.0
+        logger.info(f"  Decoded RAW: shape={image_override.shape} range=[{image_override.min():.4f}, {image_override.max():.4f}]")
 
     if image_override is None and not image_path.exists():
         logger.error(f"Image not found at: {image_path}")

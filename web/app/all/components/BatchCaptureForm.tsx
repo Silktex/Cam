@@ -54,6 +54,8 @@ export default function BatchCaptureForm() {
   const [result, setResult] = useState<BatchResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const [toast, setToast] = useState<string | null>(null);
+
   const wsRef = useRef<WebSocket | null>(null);
 
   const startBatchCapture = useCallback(() => {
@@ -96,6 +98,8 @@ export default function BatchCaptureForm() {
         case 'complete':
           setResult(data.data);
           setIsRunning(false);
+          setToast('Capture complete. Calibration & crop queued.');
+          setTimeout(() => setToast(null), 5000);
           ws.close();
           break;
         case 'error':
@@ -413,6 +417,7 @@ export default function BatchCaptureForm() {
             onClick={() => {
               const newFolder = `batch_${Date.now()}`;
               setResult(null);
+              setToast(null);
               setFolder(newFolder);
               setPrefix(newFolder);
               setPrefixTouched(false);
@@ -428,6 +433,14 @@ export default function BatchCaptureForm() {
             View Gallery
           </a>
         </div>
+
+        {/* Toast notification */}
+        {toast && (
+          <div className="mt-3 p-2.5 bg-teal-500/10 border border-teal-500/30 rounded-lg flex items-center gap-2">
+            <CheckCircle className="w-3.5 h-3.5 text-teal-400 flex-shrink-0" />
+            <span className="text-xs text-teal-300">{toast}</span>
+          </div>
+        )}
       </div>
     );
   }

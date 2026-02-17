@@ -511,8 +511,7 @@ class CameraService:
             raw_path = folder_path / "raw"
             raw_path.mkdir(parents=True, exist_ok=True)
             
-            # Generate filename: prefix_timestamp_suffix.ext
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            # Generate filename: prefix_suffix.ext (dedup with (1), (2) if needed)
             
             # Retry capture up to 3 times
             max_retries = 3
@@ -542,26 +541,39 @@ class CameraService:
                 try:
                     # Drain any pending camera events before capture
                     self._drain_camera_events()
-                    
+
                     # Capture
+                    t0 = time.time()
                     file_path = self._camera.capture(gp.GP_CAPTURE_IMAGE)
-                    logger.info(f"Captured: {file_path.folder}/{file_path.name}")
-                    
+                    t1 = time.time()
+                    logger.info(f"Captured: {file_path.folder}/{file_path.name} ({t1-t0:.2f}s)")
+
                     # Wait for camera to finish writing (important for RAW files)
                     self._wait_for_camera_ready()
-                    
+                    t2 = time.time()
+
                     # Download
                     camera_file = self._camera.file_get(
                         file_path.folder,
                         file_path.name,
                         gp.GP_FILE_TYPE_NORMAL
                     )
+                    t3 = time.time()
+                    logger.info(f"Timing: shutter={t1-t0:.2f}s wait={t2-t1:.2f}s download={t3-t2:.2f}s")
                     
-                    # Determine extension and build filename: prefix_timestamp_suffix.ext
+                    # Determine extension and build filename: prefix_suffix.ext
                     ext = Path(file_path.name).suffix or ".ARW"
                     suffix_part = f"_{suffix}" if suffix else ""
-                    local_filename = f"{prefix}_{timestamp}{suffix_part}{ext}"
+                    base_name = f"{prefix}{suffix_part}"
+                    local_filename = f"{base_name}{ext}"
                     local_path = raw_path / local_filename
+
+                    # Only add (1), (2) etc. if filename already exists
+                    counter = 1
+                    while local_path.exists():
+                        local_filename = f"{base_name}({counter}){ext}"
+                        local_path = raw_path / local_filename
+                        counter += 1
                     
                     # Save to raw/ subfolder
                     camera_file.save(str(local_path))
@@ -571,13 +583,8 @@ class CameraService:
                     # Delete from camera
                     try:
                         self._camera.file_delete(file_path.folder, file_path.name)
-                        logger.info(f"Deleted from camera: {file_path.name}")
                     except Exception as del_err:
                         logger.warning(f"Could not delete from camera: {del_err}")
-                    
-                    # Wait for camera to be ready for next operation
-                    time.sleep(0.1)
-                    self._drain_camera_events()
                     
                     # Post-process: generate TIFF, thumbnail, full_webview
                     processed = {}
@@ -674,11 +681,11 @@ class CameraService:
         """Wait for camera to finish processing (e.g., after RAW capture)"""
         if not self._camera or not self._context:
             return
-        
+
         start_time = time.time()
         while time.time() - start_time < max_wait:
             try:
-                event_type, event_data = self._camera.wait_for_event(500)
+                event_type, event_data = self._camera.wait_for_event(200)
                 if event_type == gp.GP_EVENT_TIMEOUT:
                     # No more events, camera is idle
                     break
@@ -690,9 +697,6 @@ class CameraService:
             except Exception as e:
                 logger.debug(f"Wait for ready error: {e}")
                 break
-        
-        # Small extra delay for camera to fully stabilize
-        time.sleep(0.1)
     
     # =========== Live View ===========
     

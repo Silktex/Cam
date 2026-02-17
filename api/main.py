@@ -68,6 +68,8 @@ async def lifespan(app: FastAPI):
             logger.warning(f"           Error -> {esp_info['error']}")
         logger.warning(f"           Running in simulation mode (lights tracked locally)")
 
+    logger.info(f"  Queue  : READY (calibrate + crop)")
+
     logger.info("=" * 60)
 
     yield

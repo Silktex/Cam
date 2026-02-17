@@ -40,6 +40,8 @@ export const deleteFile = (filePath: string) =>
 export const browsePath = (path: string = "") =>
   api.get(`/api/capture/browse/${path}`);
 export const getMediaUrl = (path: string) => `${API_BASE_URL}/media/captures/${path}`;
+export const resolveImageUrl = (url: string) =>
+  url.startsWith('/api/') ? `${API_BASE_URL}${url}` : `${API_BASE_URL}${url}`;
 
 // Live View
 export const getLiveViewStatus = () => api.get('/api/liveview/status');
@@ -138,6 +140,13 @@ export const updatePBRSelection = (name: string, filename: string, selected: boo
 export const getSettings = () => api.get('/api/batches/settings');
 export const updateMediaPath = (path: string) =>
   api.put('/api/batches/settings/media-path', { path });
+
+// Post-capture processing (calibrate + crop background jobs)
+export const getPostCaptureJobs = () => api.get('/api/batch/process');
+export const getPostCaptureStatus = (folder: string) =>
+  api.get(`/api/batch/process/${folder}`);
+export const queuePostCapture = (folder: string) =>
+  api.post(`/api/batch/process/${folder}`);
 
 // Processing API - Interactive Crop Workflow
 export const getTopImageForCrop = (batchName: string) =>
