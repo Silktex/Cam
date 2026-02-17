@@ -188,32 +188,17 @@ class BatchCaptureService:
             logger.info("Batch capture complete, turning off all lights")
             await self._set_all_lights_off()
 
-            # Post-process: try Celery, fall back to inline
+            # Post-process captured RAW files inline (RAW → JPG)
             if raw_captures:
-                try:
-                    from app.tasks.processing import post_process_image
-                    for capture in raw_captures:
-                        post_process_image.delay(
-                            capture["folder_path"],
+                for capture in raw_captures:
+                    try:
+                        camera_service._post_process_image(
+                            Path(capture["folder_path"]),
                             capture["raw_filename"],
                             capture["ext"],
                         )
-                    logger.info(f"Dispatched {len(raw_captures)} post-processing tasks to Celery")
-                    await self._report_progress(
-                        status="post_processing_dispatched",
-                        message=f"Dispatched {len(raw_captures)} images for background processing"
-                    )
-                except (ImportError, Exception) as e:
-                    logger.warning(f"Celery unavailable ({e}), running post-processing inline")
-                    for capture in raw_captures:
-                        try:
-                            camera_service._post_process_image(
-                                Path(capture["folder_path"]),
-                                capture["raw_filename"],
-                                capture["ext"],
-                            )
-                        except Exception as pp_err:
-                            logger.warning(f"Inline post-processing failed for {capture['raw_filename']}: {pp_err}")
+                    except Exception as pp_err:
+                        logger.warning(f"Post-processing failed for {capture['raw_filename']}: {pp_err}")
             
             # Build result
             completed_at = datetime.now()

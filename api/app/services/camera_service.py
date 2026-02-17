@@ -493,7 +493,7 @@ class CameraService:
             folder: Capture session folder name
             prefix: Filename prefix (e.g., 'fabric')
             suffix: Suffix placed before extension (e.g., 'top', 'side_1')
-            skip_post_process: If True, skip inline post-processing (for batch capture with Celery)
+            skip_post_process: If True, skip inline post-processing (for batch capture)
         """
         # Stop live view first (outside lock to avoid deadlock)
         if self._live_view_active:

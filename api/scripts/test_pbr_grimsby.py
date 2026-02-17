@@ -1,14 +1,14 @@
 """
-PBR Generation + Verification for GRIMSBY-EARTH
+PBR Generation + Verification — Multi-batch
 
 Pipeline:
-  - Top image (color calibrated) → albedo (base color) for BOTH grayscale and colored
-  - 8 side images (color calibrated) → photometric stereo → normals, roughness, height
+  - Top image (color calibrated v12) → albedo (base color) for BOTH grayscale and colored
+  - 7 side images (side_1 to side_7, skipping side_8/light) → photometric stereo → normals, roughness, height
   - Top image is EXCLUDED from photometric stereo
 
-Generates:
-  - pbr_test/grayscale/  (albedo gray, normals, roughness, height)
-  - pbr_test/colored/    (albedo color, normals, roughness, height)
+Generates per batch:
+  - pbr_v12/grayscale/  (albedo gray, normals, roughness, height)
+  - pbr_v12/colored/    (albedo color, normals, roughness, height)
 
 Verification:
   1. Normal map validity (unit length, Nz > 0, no NaN)
@@ -16,6 +16,9 @@ Verification:
   3. Height map integrability (curl of gradient field)
   4. Roughness sanity (histogram spread, spatial structure)
   5. Albedo shadow-free check
+
+Usage: python test_pbr_grimsby.py [BATCH_NAME ...]
+  Default: GRIMSBY-EARTH GRIMSBY-MUSHROOM MALVERN-SEAGREEN MALVERN-CHARCOAL
 """
 import os
 import sys
@@ -26,9 +29,10 @@ from scipy.linalg import lstsq
 from scipy.ndimage import convolve as scipy_convolve
 
 # ── Config ──────────────────────────────────────────────────────────────
-BATCH_PATH = Path(__file__).resolve().parent.parent / "media" / "captures" / "GRIMSBY-EARTH"
-SOURCE_FOLDER = BATCH_PATH / "color_calibrated"
-OUTPUT_DIR = BATCH_PATH / "pbr_test"
+BASE = Path(__file__).resolve().parent.parent / "media" / "captures"
+CALIB_FOLDER = "color_calibrated_v12"
+OUTPUT_FOLDER = "pbr_v12"
+SKIP_SIDES = {'side_8'}  # Light/backlit — exclude from photometric stereo
 
 LIGHT_DIRECTIONS = {
     'top':    [0, 0, 1],
@@ -39,7 +43,6 @@ LIGHT_DIRECTIONS = {
     'side_5': [0, -1, 1],
     'side_6': [1, -1, 1],
     'side_7': [1, 0, 1],
-    'side_8': [1, 1, 1],
 }
 
 SUPPORTED_EXT = {'.tiff', '.tif', '.png', '.jpg', '.jpeg'}
@@ -58,10 +61,26 @@ def load_images(source_folder):
     side_light_dirs = []
     side_names = []
 
-    files = sorted([
+    # Prefer TIFFs (linear) over PNGs (sRGB) — photometric stereo needs linear data
+    all_files = sorted([
         f for f in source_folder.iterdir()
         if f.suffix.lower() in SUPPORTED_EXT
     ])
+    # Deduplicate: if both .tiff and .png exist for same stem, keep only .tiff
+    seen_stems = {}
+    files = []
+    for f in all_files:
+        stem = f.stem
+        if stem in seen_stems:
+            # Keep TIFF, skip PNG
+            if f.suffix.lower() in {'.tiff', '.tif'}:
+                files = [x for x in files if x.stem != stem]
+                files.append(f)
+                seen_stems[stem] = f
+        else:
+            seen_stems[stem] = f
+            files.append(f)
+    files.sort()
 
     print(f"Found {len(files)} images in {source_folder}")
 
@@ -77,7 +96,12 @@ def load_images(source_folder):
                 break
 
         if matched_pos is None:
-            print(f"  SKIP (no match): {fpath.name}")
+            # Check if it's a skipped side (e.g., side_8)
+            is_skipped = any(s in fname or s.replace('_', '') in fname for s in SKIP_SIDES)
+            if is_skipped:
+                print(f"  SKIP (excluded): {fpath.name}")
+            else:
+                print(f"  SKIP (no match): {fpath.name}")
             continue
 
         img = cv2.imread(str(fpath), cv2.IMREAD_UNCHANGED)
@@ -463,73 +487,110 @@ def run_verification(maps, side_grays, light_dirs, side_names, output_dir, label
 
 
 # ── Main ────────────────────────────────────────────────────────────────
-def main():
-    print("=" * 60)
-    print("PBR Generation + Verification: GRIMSBY-EARTH")
-    print(f"Source: {SOURCE_FOLDER}")
-    print("=" * 60)
+def process_batch(batch_name):
+    """Process one batch. Returns (gray_results, color_results, metrics) or None."""
+    batch_path = BASE / batch_name
+    source_folder = batch_path / CALIB_FOLDER
+    output_dir = batch_path / OUTPUT_FOLDER
 
-    if not SOURCE_FOLDER.exists():
-        print(f"ERROR: {SOURCE_FOLDER} not found")
-        return 1
+    print("\n" + "=" * 70)
+    print(f"BATCH: {batch_name}")
+    print(f"Source: {source_folder}")
+    print("=" * 70)
 
-    # Load all calibrated images
-    top_gray, top_color, side_grays, side_colors, light_dirs, side_names = load_images(SOURCE_FOLDER)
+    if not source_folder.exists():
+        print(f"ERROR: {source_folder} not found — skipping")
+        return None
+
+    top_gray, top_color, side_grays, side_colors, light_dirs, side_names = load_images(source_folder)
 
     if top_gray is None or top_color is None:
         print("ERROR: No top image found")
-        return 1
+        return None
     if len(side_grays) < 3:
         print(f"ERROR: Need >=3 side images, found {len(side_grays)}")
-        return 1
+        return None
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    # ── Generate Grayscale PBR ──
+    # Generate
     gray_maps = generate_grayscale(top_gray, side_grays, light_dirs)
-    save_maps(gray_maps, OUTPUT_DIR, "grayscale")
-
-    # ── Generate Colored PBR ──
+    save_maps(gray_maps, output_dir, "grayscale")
     color_maps = generate_colored(top_color, side_colors, light_dirs)
-    save_maps(color_maps, OUTPUT_DIR, "colored")
+    save_maps(color_maps, output_dir, "colored")
 
-    # ── Verify Both ──
-    print("\n" + "=" * 60)
-    print("VERIFICATION")
-    print("=" * 60)
-
+    # Verify
     print("\n" + "-" * 60)
-    print("GRAYSCALE MODE")
+    print("GRAYSCALE VERIFICATION")
     print("-" * 60)
     gray_results = run_verification(
-        gray_maps, side_grays, light_dirs, side_names, OUTPUT_DIR, "grayscale"
+        gray_maps, side_grays, light_dirs, side_names, output_dir, f"{batch_name}_grayscale"
     )
 
     print("\n" + "-" * 60)
-    print("COLORED MODE")
+    print("COLORED VERIFICATION")
     print("-" * 60)
     color_results = run_verification(
-        color_maps, side_grays, light_dirs, side_names, OUTPUT_DIR, "colored"
+        color_maps, side_grays, light_dirs, side_names, output_dir, f"{batch_name}_colored"
     )
 
-    # ── Summary ──
-    print("\n" + "=" * 60)
-    print("SUMMARY")
-    print("=" * 60)
+    # Collect key metrics for comparison
+    metrics = {
+        'batch': batch_name,
+        'n_sides': len(side_grays),
+        'gray_normals_ok': gray_results['normals'],
+        'gray_rerender_ok': gray_results['rerender'],
+        'color_normals_ok': color_results['normals'],
+        'color_rerender_ok': color_results['rerender'],
+        'output_dir': str(output_dir),
+    }
 
+    return gray_results, color_results, metrics
+
+
+def main():
+    batch_names = sys.argv[1:] if len(sys.argv) > 1 else [
+        "GRIMSBY-EARTH", "GRIMSBY-MUSHROOM", "MALVERN-SEAGREEN", "MALVERN-CHARCOAL"
+    ]
+
+    print("=" * 70)
+    print("PBR Generation + Verification (v12 calibrated, skip side_8)")
+    print(f"Batches: {batch_names}")
+    print(f"Skipping: {SKIP_SIDES}")
+    print("=" * 70)
+
+    all_metrics = []
     all_pass = True
-    for mode_name, results in [("grayscale", gray_results), ("colored", color_results)]:
-        print(f"\n  {mode_name.upper()}:")
-        for test, passed in results.items():
-            status = "PASS" if passed else "FAIL"
-            print(f"    {test:25s} {status}")
-            if not passed:
-                all_pass = False
+
+    for batch_name in batch_names:
+        result = process_batch(batch_name)
+        if result is None:
+            continue
+        gray_results, color_results, metrics = result
+        all_metrics.append(metrics)
+
+        for mode, results in [("grayscale", gray_results), ("colored", color_results)]:
+            for test, passed in results.items():
+                if not passed:
+                    all_pass = False
+
+    # ── Cross-batch comparison ──
+    print("\n" + "=" * 70)
+    print("CROSS-BATCH COMPARISON")
+    print("=" * 70)
+
+    if all_metrics:
+        print(f"\n  {'Batch':>25s}  {'Sides':>5s}  {'Gray Nrm':>8s}  {'Gray ReR':>8s}  {'Color Nrm':>9s}  {'Color ReR':>9s}")
+        print(f"  {'-'*70}")
+        for m in all_metrics:
+            def p(v): return 'PASS' if v else 'FAIL'
+            print(f"  {m['batch']:>25s}  {m['n_sides']:>5d}  {p(m['gray_normals_ok']):>8s}  "
+                  f"{p(m['gray_rerender_ok']):>8s}  {p(m['color_normals_ok']):>9s}  {p(m['color_rerender_ok']):>9s}")
 
     print(f"\n  Overall: {'ALL TESTS PASSED' if all_pass else 'SOME TESTS FAILED'}")
-    print(f"  Output:  {OUTPUT_DIR}")
-    print(f"    grayscale/ — albedo (gray top), normals, roughness, height")
-    print(f"    colored/   — albedo (color top), normals, roughness, height")
+    for m in all_metrics:
+        print(f"  {m['batch']:>25s} -> {m['output_dir']}")
+
     return 0 if all_pass else 1
 
 
