@@ -643,16 +643,20 @@ export default function ProcessingPage() {
                   <div className="flex items-center gap-3">
                     {job.status === 'processing' && (
                       <span className="text-xs text-slate-400">
-                        {job.current_step === 'calibrating'
-                          ? `Calibrated ${job.calibrated_count}/9`
-                          : job.current_step === 'cropping'
-                            ? `Cropped ${job.cropped_count}/9`
-                            : job.current_step}
+                        {job.current_step === 'calibrating_top'
+                          ? 'Calibrating top image...'
+                          : job.current_step === 'detecting_boundary'
+                            ? 'Detecting fabric boundary...'
+                            : job.current_step === 'cropping_top'
+                              ? 'Cropping top image...'
+                              : job.current_step === 'saving_calibration'
+                                ? 'Saving calibration params...'
+                                : job.current_step}
                       </span>
                     )}
                     {job.status === 'completed' && (
                       <span className="text-xs text-slate-400">
-                        {job.calibrated_count} calibrated, {job.cropped_count} cropped
+                        Top calibrated + cropped, rest on-demand
                       </span>
                     )}
                     {job.status === 'failed' && (

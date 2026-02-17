@@ -147,6 +147,11 @@ export const getPostCaptureStatus = (folder: string) =>
   api.get(`/api/batch/process/${folder}`);
 export const queuePostCapture = (folder: string) =>
   api.post(`/api/batch/process/${folder}`);
+export const getCalibration = (folder: string) =>
+  api.get(`/api/batch/calibration/${folder}`);
+export const renderBatchImage = (
+  folder: string, filename: string, format: 'jpg' | 'tiff' = 'jpg', crop: boolean = true
+) => `${API_BASE_URL}/api/batch/render/${folder}/${filename}?format=${format}&crop=${crop}`;
 
 // Processing API - Interactive Crop Workflow
 export const getTopImageForCrop = (batchName: string) =>

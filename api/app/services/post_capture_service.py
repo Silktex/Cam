@@ -1,9 +1,10 @@
 """
 Post-Capture Processing Service
 
-Runs calibrate + crop in background after batch capture completes.
-Uses a single-threaded executor so jobs queue and run one at a time.
+Lazy calibrate+crop: processes ONLY the top image eagerly, stores calibration
+parameters as JSON, and renders the other 8 images on demand via render_image().
 """
+import json
 import logging
 import threading
 import time
@@ -99,7 +100,7 @@ class PostCaptureService:
         }
 
     def _run_job(self, batch: str):
-        """Execute calibrate+crop (runs in worker thread)."""
+        """Calibrate + crop the top image only, save params for on-demand rendering."""
         job = self._jobs[batch]
         job.status = "processing"
         job.started_at = datetime.now().isoformat()
@@ -142,39 +143,34 @@ class PostCaptureService:
             )
             logger.info(f"[{batch}] Found {len(fabric_arws)} RAW files")
 
-            # ── Calibrate ──
-            job.current_step = "calibrating"
+            # ── Find top RAW ──
+            top_arw = next((f for f in fabric_arws if "_top" in f.name.lower()), None)
+            if top_arw is None:
+                raise ValueError("No top image found among RAW files")
+
+            # ── Calibrate ONLY the top image ──
+            job.current_step = "calibrating_top"
             cal_dir = output_dir / "calibrated"
             cal_dir.mkdir(parents=True, exist_ok=True)
 
-            calibrated_paths = []
-            for arw_path in fabric_arws:
-                img, _ = _load_raw_linear(arw_path, fixed_wb=checker_wb_raw)
-                h, w, _ = img.shape
-                flat = img.reshape(-1, 3)
-                corrected = (matrix @ flat.T).T.reshape(h, w, 3)
-                corrected = np.clip(corrected, 0, 1)
+            img, _ = _load_raw_linear(top_arw, fixed_wb=checker_wb_raw)
+            h, w, _ = img.shape
+            flat = img.reshape(-1, 3)
+            corrected = (matrix @ flat.T).T.reshape(h, w, 3)
+            corrected = np.clip(corrected, 0, 1)
 
-                srgb = _linear_to_srgb(corrected)
-                srgb_16 = (srgb * 65535).astype(np.uint16)
-                bgr_16 = cv2.cvtColor(srgb_16, cv2.COLOR_RGB2BGR)
+            srgb = _linear_to_srgb(corrected)
+            srgb_16 = (srgb * 65535).astype(np.uint16)
+            bgr_16 = cv2.cvtColor(srgb_16, cv2.COLOR_RGB2BGR)
 
-                tiff_path = cal_dir / f"{arw_path.stem}.tiff"
-                cv2.imwrite(str(tiff_path), bgr_16)
-                calibrated_paths.append(tiff_path)
-                job.calibrated_count = len(calibrated_paths)
-                logger.info(f"[{batch}] Calibrated: {arw_path.name}")
+            top_tiff = cal_dir / f"{top_arw.stem}.tiff"
+            cv2.imwrite(str(top_tiff), bgr_16)
+            job.calibrated_count = 1
+            logger.info(f"[{batch}] Calibrated top: {top_arw.name}")
 
-            # ── Auto-crop ──
-            job.current_step = "cropping"
-            crop_dir = output_dir / "cropped"
-            crop_dir.mkdir(parents=True, exist_ok=True)
-
-            top_path = next((p for p in calibrated_paths if "_top" in p.name.lower()), None)
-            if top_path is None:
-                raise ValueError("No top image found among calibrated images")
-
-            top_img = cv2.imread(str(top_path), cv2.IMREAD_UNCHANGED)
+            # ── Detect boundary on calibrated top → compute crop box ──
+            job.current_step = "detecting_boundary"
+            top_img = cv2.imread(str(top_tiff), cv2.IMREAD_UNCHANGED)
             bbox = _detect_fabric_boundary(top_img)
 
             h, w = top_img.shape[:2]
@@ -194,20 +190,43 @@ class PostCaptureService:
             if crop_y2 - crop_y1 < job.crop_size:
                 crop_y1 = max(0, crop_y2 - job.crop_size)
 
-            cropped_paths = []
-            for cal_path in calibrated_paths:
-                img = cv2.imread(str(cal_path), cv2.IMREAD_UNCHANGED)
-                cropped = img[crop_y1:crop_y2, crop_x1:crop_x2]
-                out_path = crop_dir / cal_path.name
-                cv2.imwrite(str(out_path), cropped)
-                cropped_paths.append(out_path)
-                job.cropped_count = len(cropped_paths)
-                logger.info(f"[{batch}] Cropped: {cal_path.name}")
+            # ── Crop ONLY the top image ──
+            job.current_step = "cropping_top"
+            crop_dir = output_dir / "cropped"
+            crop_dir.mkdir(parents=True, exist_ok=True)
+
+            cropped = top_img[crop_y1:crop_y2, crop_x1:crop_x2]
+            crop_out = crop_dir / f"{top_arw.stem}.tiff"
+            cv2.imwrite(str(crop_out), cropped)
+            job.cropped_count = 1
+            logger.info(f"[{batch}] Cropped top: {top_arw.name}")
+
+            # ── Save calibration.json for on-demand rendering ──
+            job.current_step = "saving_calibration"
+            cal_data = {
+                "profile_name": job.profile,
+                "checker_wb": checker_wb_raw,
+                "matrix_3x3": matrix.tolist(),
+                "crop_box": {
+                    "x1": int(crop_x1),
+                    "y1": int(crop_y1),
+                    "x2": int(crop_x2),
+                    "y2": int(crop_y2),
+                },
+                "crop_size": job.crop_size,
+                "raw_files": [f.name for f in fabric_arws],
+                "top_image": top_arw.name,
+                "created_at": datetime.now().isoformat(),
+            }
+            cal_json_path = output_dir / "calibration.json"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            cal_json_path.write_text(json.dumps(cal_data, indent=2))
+            logger.info(f"[{batch}] Saved calibration.json")
 
             job.status = "completed"
             job.completed_at = datetime.now().isoformat()
             job.current_step = "done"
-            logger.info(f"[{batch}] Processing complete: {len(calibrated_paths)} calibrated, {len(cropped_paths)} cropped")
+            logger.info(f"[{batch}] Processing complete: top calibrated + cropped, {len(fabric_arws) - 1} on-demand")
 
         except Exception as e:
             job.status = "failed"
@@ -332,6 +351,72 @@ def _detect_fabric_boundary(img):
     pad = int(min(bw, bh) * 0.03)
 
     return (max(0, x - pad), max(0, y - pad), min(w, x + bw + pad), min(h, y + bh + pad))
+
+
+def load_calibration(batch: str) -> dict:
+    """Load calibration.json for a batch folder."""
+    cal_path = settings.CAPTURES_DIR / batch / "output" / "calibration.json"
+    if not cal_path.exists():
+        raise FileNotFoundError(f"calibration.json not found for batch: {batch}")
+    return json.loads(cal_path.read_text())
+
+
+def render_image(batch: str, filename: str, fmt: str = "jpg", crop: bool = True) -> bytes:
+    """
+    Render a single RAW image using stored calibration parameters.
+    Returns encoded image bytes (JPEG or TIFF).
+    """
+    import cv2
+    import numpy as np
+
+    cal = load_calibration(batch)
+    raw_dir = settings.CAPTURES_DIR / batch / "raw"
+    raw_path = raw_dir / filename
+    if not raw_path.exists():
+        raise FileNotFoundError(f"RAW file not found: {filename}")
+
+    # Check if this is the top image and a pre-rendered file exists
+    stem = raw_path.stem
+    if crop:
+        cached = settings.CAPTURES_DIR / batch / "output" / "cropped" / f"{stem}.tiff"
+    else:
+        cached = settings.CAPTURES_DIR / batch / "output" / "calibrated" / f"{stem}.tiff"
+    if cached.exists():
+        img = cv2.imread(str(cached), cv2.IMREAD_UNCHANGED)
+        if fmt == "tiff":
+            _, buf = cv2.imencode(".tiff", img)
+            return bytes(buf)
+        else:
+            img_8 = (img / 256).astype(np.uint8) if img.dtype == np.uint16 else img
+            _, buf = cv2.imencode(".jpg", img_8, [cv2.IMWRITE_JPEG_QUALITY, 92])
+            return bytes(buf)
+
+    # Decode RAW with stored WB
+    checker_wb = cal.get("checker_wb")
+    matrix = np.array(cal["matrix_3x3"], dtype=np.float64)
+
+    img, _ = _load_raw_linear(raw_path, fixed_wb=checker_wb)
+    h, w, _ = img.shape
+    flat = img.reshape(-1, 3)
+    corrected = (matrix @ flat.T).T.reshape(h, w, 3)
+    corrected = np.clip(corrected, 0, 1)
+
+    srgb = _linear_to_srgb(corrected)
+    srgb_16 = (srgb * 65535).astype(np.uint16)
+    bgr_16 = cv2.cvtColor(srgb_16, cv2.COLOR_RGB2BGR)
+
+    # Apply crop if requested
+    if crop:
+        cb = cal["crop_box"]
+        bgr_16 = bgr_16[cb["y1"]:cb["y2"], cb["x1"]:cb["x2"]]
+
+    if fmt == "tiff":
+        _, buf = cv2.imencode(".tiff", bgr_16)
+        return bytes(buf)
+    else:
+        img_8 = (bgr_16 / 256).astype(np.uint8)
+        _, buf = cv2.imencode(".jpg", img_8, [cv2.IMWRITE_JPEG_QUALITY, 92])
+        return bytes(buf)
 
 
 # Singleton

@@ -3,7 +3,8 @@ Batch Capture API Router
 """
 import asyncio
 import logging
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi.responses import Response
 from typing import Optional
 
 from app.models.batch_capture import BatchCaptureRequest, BatchCaptureResult, BatchCaptureProgress
@@ -12,6 +13,9 @@ from app.services.batch_capture_service import batch_capture_service
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Limit concurrent on-demand renders (each uses ~500-800MB RAM)
+_render_semaphore = asyncio.Semaphore(2)
 
 
 @router.post("/start", response_model=BatchCaptureResult)
@@ -102,6 +106,53 @@ async def get_processing_status(folder: str):
 async def list_processing_jobs():
     """List all post-capture processing jobs."""
     return post_capture_service.list_jobs()
+
+
+# ── On-demand render (lazy calibrate+crop) ──
+
+from app.services.post_capture_service import render_image, load_calibration
+
+
+@router.get("/render/{folder}/{filename}")
+async def render_batch_image(
+    folder: str,
+    filename: str,
+    fmt: str = Query("jpg", alias="format", regex="^(jpg|tiff)$"),
+    crop: bool = Query(True),
+):
+    """
+    Render a calibrated (and optionally cropped) image on demand.
+
+    Uses stored calibration.json parameters — same math as the eager pipeline.
+    Returns JPG (8-bit) or TIFF (16-bit).
+    """
+    async with _render_semaphore:
+        try:
+            loop = asyncio.get_event_loop()
+            data = await loop.run_in_executor(
+                None, render_image, folder, filename, fmt, crop
+            )
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except Exception as e:
+            logger.exception(f"Render failed: {folder}/{filename}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    media_type = "image/tiff" if fmt == "tiff" else "image/jpeg"
+    return Response(
+        content=data,
+        media_type=media_type,
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
+@router.get("/calibration/{folder}")
+async def get_calibration(folder: str):
+    """Return the stored calibration.json for a batch."""
+    try:
+        return load_calibration(folder)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @router.websocket("/ws")
