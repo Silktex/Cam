@@ -1,10 +1,13 @@
 """
 Capture Router - Image capture with folder support
 """
+import io
 import os
 from pathlib import Path
 from typing import List
-from fastapi import APIRouter, HTTPException
+
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse
 
 from app.config import settings
 from app.services.camera_service import camera_service
@@ -55,6 +58,56 @@ async def capture_images(request: CaptureRequest):
         folder=request.folder,
         files=results,
         message=f"Captured {success_count}/{request.count} images",
+    )
+
+
+SIZE_PRESETS = {
+    "thumb": 400,
+    "webview": 2400,
+    "full": None,  # no resize
+}
+
+
+@router.get("/image/{session}/{filename}")
+async def serve_image(
+    session: str,
+    filename: str,
+    size: str = Query("full", regex="^(thumb|webview|full)$"),
+):
+    """
+    Serve a JPG from the jpg/ folder, optionally resized on-the-fly.
+    ?size=thumb  → max 400px longest side
+    ?size=webview → max 2400px longest side
+    ?size=full   → original resolution
+    """
+    jpg_path = settings.CAPTURES_DIR / session / "jpg" / filename
+
+    # Prevent path traversal
+    try:
+        jpg_path.resolve().relative_to(settings.CAPTURES_DIR.resolve())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid path")
+
+    if not jpg_path.is_file():
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    from PIL import Image as PILImage
+
+    max_px = SIZE_PRESETS[size]
+    img = PILImage.open(jpg_path)
+
+    if max_px and max(img.size) > max_px:
+        img.thumbnail((max_px, max_px), PILImage.Resampling.LANCZOS)
+
+    buf = io.BytesIO()
+    quality = 80 if size == "thumb" else 92
+    img.save(buf, format="JPEG", quality=quality, optimize=True)
+    buf.seek(0)
+
+    return StreamingResponse(
+        buf,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=3600"},
     )
 
 
@@ -135,58 +188,49 @@ async def browse_path(path: str = ""):
             is_image = ext in [".jpg", ".jpeg", ".png", ".gif", ".webp", ".tiff", ".tif", ".arw", ".cr2", ".nef", ".dng"]
 
             # Find thumbnail and display/download URLs
-            # Only override with cropped versions when browsing the session root or cropped folder
-            # When browsing raw/, tiff/, thumbnail/ etc. — show that folder's own content
+            # Use the dynamic resize endpoint when a jpg/ derivative exists
             thumbnail_url = None
             display_url = f"/media/captures/{rel_path}"
             download_url = f"/media/captures/{rel_path}"
 
-            DERIVED_FOLDERS = {"raw", "tiff", "thumbnail", "cropped_thumbnail", "full_webview"}
+            DERIVED_FOLDERS = {"raw", "jpg", "tiff", "thumbnail", "cropped_thumbnail", "full_webview"}
             if is_image and path:
                 parent_parts = path.split("/")
                 session_folder = parent_parts[0] if len(parent_parts) >= 1 else None
                 current_subfolder = parent_parts[1] if len(parent_parts) >= 2 else None
 
                 if session_folder:
-                    if current_subfolder in DERIVED_FOLDERS:
-                        # Browsing a specific derived folder — use its own thumbnail, don't override
-                        thumb_path = settings.CAPTURES_DIR / session_folder / "thumbnail" / f"{item.stem}.jpg"
-                        if thumb_path.exists():
-                            thumbnail_url = f"/media/captures/{session_folder}/thumbnail/{item.stem}.jpg"
-                        # Display: use full_webview if available (viewable JPG of this folder's content)
-                        full_webview = settings.CAPTURES_DIR / session_folder / "full_webview" / f"{item.stem}.jpg"
-                        if full_webview.exists():
-                            display_url = f"/media/captures/{session_folder}/full_webview/{item.stem}.jpg"
-                    elif current_subfolder == "cropped":
-                        # Browsing cropped folder — use cropped_thumbnail for cards, cropped_thumbnail for view
+                    jpg_file = settings.CAPTURES_DIR / session_folder / "jpg" / f"{item.stem}.jpg"
+                    has_jpg = jpg_file.is_file()
+
+                    if current_subfolder == "cropped":
+                        # Browsing cropped folder — use cropped_thumbnail for cards
                         cropped_thumb_path = settings.CAPTURES_DIR / session_folder / "cropped_thumbnail" / f"{item.stem}.jpg"
                         if cropped_thumb_path.exists():
                             thumbnail_url = f"/media/captures/{session_folder}/cropped_thumbnail/{item.stem}.jpg"
                             display_url = f"/media/captures/{session_folder}/cropped_thumbnail/{item.stem}.jpg"
                         download_url = f"/media/captures/{rel_path}"
+                    elif current_subfolder in DERIVED_FOLDERS:
+                        # Browsing a specific derived folder — use dynamic resize from jpg/
+                        if has_jpg:
+                            thumbnail_url = f"/api/capture/image/{session_folder}/{item.stem}.jpg?size=thumb"
+                            display_url = f"/api/capture/image/{session_folder}/{item.stem}.jpg?size=webview"
                     else:
-                        # Session root or unknown subfolder — prefer cropped versions
+                        # Session root or unknown subfolder
                         cropped_thumb_path = settings.CAPTURES_DIR / session_folder / "cropped_thumbnail" / f"{item.stem}.jpg"
-                        thumb_path = settings.CAPTURES_DIR / session_folder / "thumbnail" / f"{item.stem}.jpg"
                         if cropped_thumb_path.exists():
                             thumbnail_url = f"/media/captures/{session_folder}/cropped_thumbnail/{item.stem}.jpg"
-                        elif thumb_path.exists():
-                            thumbnail_url = f"/media/captures/{session_folder}/thumbnail/{item.stem}.jpg"
-
-                        # Display URL: prefer cropped_thumbnail > full_webview
-                        cropped_thumb = settings.CAPTURES_DIR / session_folder / "cropped_thumbnail" / f"{item.stem}.jpg"
-                        full_webview = settings.CAPTURES_DIR / session_folder / "full_webview" / f"{item.stem}.jpg"
-                        if cropped_thumb.exists():
                             display_url = f"/media/captures/{session_folder}/cropped_thumbnail/{item.stem}.jpg"
-                        elif full_webview.exists():
-                            display_url = f"/media/captures/{session_folder}/full_webview/{item.stem}.jpg"
+                        elif has_jpg:
+                            thumbnail_url = f"/api/capture/image/{session_folder}/{item.stem}.jpg?size=thumb"
+                            display_url = f"/api/capture/image/{session_folder}/{item.stem}.jpg?size=webview"
 
                         # Download URL: prefer cropped > original
                         cropped_dir = settings.CAPTURES_DIR / session_folder / "cropped"
-                        for ext in ['.tiff', '.jpg', '.jpeg', '.png']:
-                            cropped_path = cropped_dir / f"{item.stem}{ext}"
+                        for crop_ext in ['.tiff', '.jpg', '.jpeg', '.png']:
+                            cropped_path = cropped_dir / f"{item.stem}{crop_ext}"
                             if cropped_path.exists():
-                                download_url = f"/media/captures/{session_folder}/cropped/{item.stem}{ext}"
+                                download_url = f"/media/captures/{session_folder}/cropped/{item.stem}{crop_ext}"
                                 break
 
             items.append({
@@ -322,7 +366,7 @@ async def delete_file(file_path: str):
             "cropped_thumbnail": ["cropped"],
         }
         # Default: clean all derived dirs
-        dirs_to_clean = SIBLING_MAP.get(source_dir, ["thumbnail", "cropped_thumbnail", "full_webview", "cropped"])
+        dirs_to_clean = SIBLING_MAP.get(source_dir, ["jpg", "thumbnail", "cropped_thumbnail", "full_webview", "cropped"])
 
         for derived_dir in dirs_to_clean:
             derived_parent = settings.CAPTURES_DIR / session_folder / derived_dir

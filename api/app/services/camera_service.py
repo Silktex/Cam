@@ -599,9 +599,7 @@ class CameraService:
                         "file_url": f"/media/captures/{folder}/raw/{local_filename}",
                         "file_size": file_size,
                         "captured_at": datetime.now().isoformat(),
-                        "thumbnail_url": processed.get("thumbnail_url"),
-                        "webview_url": processed.get("webview_url"),
-                        "tiff_url": processed.get("tiff_url"),
+                        "jpg_url": processed.get("jpg_url"),
                     }
                 
                 except gp.GPhoto2Error as e:
@@ -618,99 +616,45 @@ class CameraService:
     def _post_process_image(self, folder_path: Path, raw_filename: str, ext: str) -> Dict[str, str]:
         """
         Post-process a captured RAW image:
-        1. Convert RAW → 16-bit TIFF (saved to tiff/)
-        2. Generate full web-view JPEG (saved to full_webview/)
-        3. Generate small thumbnail JPEG (saved to thumbnail/)
-        
-        Returns dict with URLs for each derivative.
+        Decode RAW at 8-bit sRGB and save a single full-resolution JPG.
+        Thumbnails/webviews are served on-the-fly via the resize endpoint.
+
+        Returns dict with jpg_url.
         Non-blocking: failures are logged but don't prevent capture success.
         """
         result = {}
         raw_path = folder_path / "raw" / raw_filename
         stem = Path(raw_filename).stem  # e.g. fabric_20260211_144925_top
         folder_name = folder_path.name
-        
-        # Create subdirectories
-        tiff_dir = folder_path / "tiff"
-        thumb_dir = folder_path / "thumbnail"
-        webview_dir = folder_path / "full_webview"
-        tiff_dir.mkdir(exist_ok=True)
-        thumb_dir.mkdir(exist_ok=True)
-        webview_dir.mkdir(exist_ok=True)
-        
+
+        # Create jpg/ subdirectory
+        jpg_dir = folder_path / "jpg"
+        jpg_dir.mkdir(exist_ok=True)
+
         try:
             import rawpy
             from PIL import Image as PILImage
-            
-            # Read RAW file
+
             with rawpy.imread(str(raw_path)) as raw:
-                # ── 1. TIFF (16-bit, full resolution) ──
-                try:
-                    rgb_16 = raw.postprocess(
-                        use_camera_wb=True,
-                        output_bps=16,
-                        no_auto_bright=True,
-                        output_color=rawpy.ColorSpace.sRGB,
-                        gamma=(1, 1),  # Linear output — gamma applied later by calibration
-                    )
-                    tiff_filename = f"{stem}.tiff"
-                    tiff_path = tiff_dir / tiff_filename
+                rgb_8 = raw.postprocess(
+                    use_camera_wb=True,
+                    output_bps=8,
+                    no_auto_bright=True,
+                    output_color=rawpy.ColorSpace.sRGB,
+                )
 
-                    # Try tifffile for proper 16-bit support, fallback to imageio/PIL
-                    try:
-                        import tifffile
-                        tifffile.imwrite(str(tiff_path), rgb_16, compression='lzw')
-                    except ImportError:
-                        try:
-                            import imageio.v3 as iio
-                            iio.imwrite(str(tiff_path), rgb_16)
-                        except ImportError:
-                            # Fallback: save as 8-bit TIFF using PIL
-                            rgb_8_tiff = (rgb_16 / 256).astype('uint8')
-                            tiff_img = PILImage.fromarray(rgb_8_tiff)
-                            tiff_img.save(str(tiff_path), format="TIFF", compression="tiff_lzw")
-                            logger.info("Saved as 8-bit TIFF (install tifffile for 16-bit)")
+            jpg_filename = f"{stem}.jpg"
+            jpg_path = jpg_dir / jpg_filename
+            img = PILImage.fromarray(rgb_8)
+            img.save(str(jpg_path), format="JPEG", quality=95, optimize=True)
+            result["jpg_url"] = f"/media/captures/{folder_name}/jpg/{jpg_filename}"
+            logger.info(f"JPG saved: {jpg_path} ({img.size[0]}x{img.size[1]})")
 
-                    result["tiff_url"] = f"/media/captures/{folder_name}/tiff/{tiff_filename}"
-                    logger.info(f"TIFF saved: {tiff_path}")
-                except Exception as e:
-                    logger.warning(f"TIFF conversion failed: {e}", exc_info=True)
-                
-                # ── 2 & 3. Full webview + thumbnail (8-bit for JPEG) ──
-                try:
-                    rgb_8 = raw.postprocess(
-                        use_camera_wb=True,
-                        output_bps=8,
-                        no_auto_bright=True,
-                    )
-                    full_img = PILImage.fromarray(rgb_8)
-                    
-                    # Full webview — resize to max 2400px on longest side, JPEG quality 92
-                    webview_filename = f"{stem}.jpg"
-                    webview_path = webview_dir / webview_filename
-                    webview_img = full_img.copy()
-                    webview_img.thumbnail((2400, 2400), PILImage.Resampling.LANCZOS)
-                    webview_img.save(str(webview_path), format="JPEG", quality=92, optimize=True)
-                    result["webview_url"] = f"/media/captures/{folder_name}/full_webview/{webview_filename}"
-                    logger.info(f"Webview saved: {webview_path} ({webview_img.size[0]}x{webview_img.size[1]})")
-                    
-                    # Thumbnail — resize to max 400px, JPEG quality 80
-                    thumb_filename = f"{stem}.jpg"
-                    thumb_path = thumb_dir / thumb_filename
-                    thumb_img = full_img.copy()
-                    thumb_img.thumbnail((400, 400), PILImage.Resampling.LANCZOS)
-                    thumb_img.save(str(thumb_path), format="JPEG", quality=80, optimize=True)
-                    result["thumbnail_url"] = f"/media/captures/{folder_name}/thumbnail/{thumb_filename}"
-                    logger.info(f"Thumbnail saved: {thumb_path} ({thumb_img.size[0]}x{thumb_img.size[1]})")
-                    
-                except Exception as e:
-                    logger.warning(f"Webview/thumbnail generation failed: {e}")
-                    
         except ImportError:
             logger.warning("rawpy/Pillow not installed — skipping post-processing. Install: pip install rawpy Pillow")
         except Exception as e:
             logger.warning(f"Post-processing failed for {raw_filename}: {e}")
-        
+
         return result
     
     def _drain_camera_events(self, timeout_ms: int = 100):
