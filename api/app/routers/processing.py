@@ -28,7 +28,7 @@ class ManualCropRequest(BaseModel):
 class AutoCropRequest(BaseModel):
     batch_name: str
     prompt: str = "fabric sample"
-    crop_size: int = 2048
+    crop_size: int = 3200
 
 
 class ReconvertTiffRequest(BaseModel):

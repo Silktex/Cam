@@ -124,14 +124,25 @@ class CropService:
                 return None
             h, w = img.shape[:2]
 
+            # Compute preview dimensions (matches _generate_thumbnail_base64 resize logic)
+            max_size = 1200
+            if max(h, w) > max_size:
+                s = max_size / max(h, w)
+                preview_w, preview_h = int(w * s), int(h * s)
+            else:
+                preview_w, preview_h = w, h
+
+            base64_url = self._generate_thumbnail_base64(img)
+
             return {
                 "batch_name": batch_name,
                 "filename": top_image.name,
                 "width": w,
                 "height": h,
-                "thumb_width": w,
-                "thumb_height": h,
-                "thumbnail_url": self._generate_thumbnail_base64(img),
+                "preview_width": preview_w,
+                "preview_height": preview_h,
+                "preview_url": base64_url,
+                "thumbnail_url": base64_url,
                 "source_type": source_type,
             }
 

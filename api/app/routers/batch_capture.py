@@ -71,7 +71,7 @@ from app.services.post_capture_service import post_capture_service
 async def queue_processing(
     folder: str,
     profile: str = "CHECKER-17FEB.npz",
-    crop_size: int = 2048,
+    crop_size: int = 3200,
 ):
     """Manually queue calibrate+crop for a batch folder."""
     try:

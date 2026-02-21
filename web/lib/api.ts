@@ -4,6 +4,7 @@ export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost
 
 // Convert relative URL to full backend URL
 export const getFullUrl = (path: string) => {
+  if (!path) return '';
   if (path.startsWith('data:') || path.startsWith('http')) return path;
   return `${API_BASE_URL}${path}`;
 };

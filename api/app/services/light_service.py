@@ -96,22 +96,47 @@ class LightControllerService:
 
     async def _poll_loop(self):
         """Background task that polls ESP32 for state changes."""
+        _reconnect_counter = 0
         while True:
             try:
                 await asyncio.sleep(self._poll_interval)
-                
-                if self.connected and self._websocket_clients:
-                    # Only poll if connected and there are WebSocket clients
+
+                if not self.connected:
+                    # Retry connection every ~10 poll cycles (~30s)
+                    _reconnect_counter += 1
+                    if _reconnect_counter >= 10:
+                        _reconnect_counter = 0
+                        await self._try_reconnect()
+                    continue
+
+                if self._websocket_clients:
                     state_changed = await self._poll_esp32_states()
                     if state_changed:
                         await self._broadcast_state()
-                        
+
             except asyncio.CancelledError:
                 logger.info("Polling task cancelled")
                 break
             except Exception as e:
                 logger.error(f"Error in polling loop: {e}")
-                await asyncio.sleep(5)  # Wait longer on error
+                await asyncio.sleep(5)
+
+    async def _try_reconnect(self):
+        """Attempt to reconnect to ESP32 (called from poll loop)."""
+        host = settings.ESP32_HOST
+        try:
+            if not self._session or self._session.closed:
+                self._session = aiohttp.ClientSession(
+                    timeout=aiohttp.ClientTimeout(total=5)
+                )
+            async with self._session.get(f"http://{host}/") as resp:
+                if resp.status == 200:
+                    self.connected = True
+                    await self._poll_esp32_states()
+                    await self._broadcast_state()
+                    logger.info(f"Reconnected to ESP32 at {host}")
+        except Exception as e:
+            logger.debug(f"ESP32 reconnect failed: {e}")
 
     async def _poll_esp32_states(self) -> bool:
         """

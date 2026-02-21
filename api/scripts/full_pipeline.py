@@ -15,14 +15,16 @@ Usage:
       --checker SINGLE_V2_20260216_160056.ARW \
       --glb ~/Downloads/sofa_web.glb \
       --output ~/Downloads/new/output \
-      --crop-size 2048
+      --crop-size 3200
 """
 
 import argparse
+import json
 import logging
 import re
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import cv2
@@ -241,7 +243,7 @@ def step1_calibrate(input_dir, checker_name, output_dir):
     checker_path = input_dir / checker_name
     if not checker_path.exists():
         log.error(f"Checker not found: {checker_path}")
-        return None, []
+        return None, [], None, []
 
     # Find fabric ARWs (everything except the checker)
     all_arws = sorted(input_dir.glob("*.ARW"))
@@ -262,7 +264,7 @@ def step1_calibrate(input_dir, checker_name, output_dir):
     detected, reference = detect_swatches(checker_img)
     if detected is None:
         log.error("  No checker detected!")
-        return None, []
+        return None, [], None, []
 
     detected = auto_fix_serpentine(detected, reference)
     gates_ok, gate_warnings, reshoot_reasons = quality_gates(detected)
@@ -300,7 +302,7 @@ def step1_calibrate(input_dir, checker_name, output_dir):
         log.info(f"  Saved: {tiff_path}")
 
     log.info(f"\n  Calibration complete: {len(calibrated_paths)} images -> {cal_dir}")
-    return matrix, calibrated_paths
+    return matrix, calibrated_paths, checker_wb_raw, [f.name for f in fabric_arws]
 
 
 # =========================================================================
@@ -392,6 +394,16 @@ def step2_crop(calibrated_paths, output_dir, crop_size):
         cx = (x1 + x2) // 2
         cy = (y1 + y2) // 2
         log.info(f"  Detected boundary: ({x1},{y1})->({x2},{y2}), center=({cx},{cy})")
+        # Clamp crop_size to detected boundary (anomaly: fabric smaller than requested crop)
+        detected_w = x2 - x1
+        detected_h = y2 - y1
+        detected_size = max(detected_w, detected_h)
+        if detected_size < crop_size:
+            log.info(f"  Detected region ({detected_size}px) smaller than crop_size ({crop_size}px), shrinking crop")
+            crop_size = detected_size
+
+    # Clamp to image dims
+    crop_size = min(crop_size, w, h)
 
     # Compute crop box centered on detected region
     half = crop_size // 2
@@ -422,7 +434,20 @@ def step2_crop(calibrated_paths, output_dir, crop_size):
         log.info(f"  Cropped: {cal_path.name} -> {cropped.shape[1]}x{cropped.shape[0]}")
 
     log.info(f"\n  Crop complete: {len(cropped_paths)} images -> {crop_dir}")
-    return cropped_paths
+
+    # Find top image name for calibration.json
+    top_name = top_path.stem.split("/")[-1]
+    for p in calibrated_paths:
+        if "_top" in p.name.lower():
+            top_name = p.stem + ".ARW"
+            break
+
+    crop_info = {
+        "crop_box": {"x1": int(crop_x1), "y1": int(crop_y1), "x2": int(crop_x2), "y2": int(crop_y2)},
+        "crop_size": int(crop_x2 - crop_x1),
+        "top_image": top_name,
+    }
+    return cropped_paths, crop_info
 
 
 # =========================================================================
@@ -877,6 +902,62 @@ def compute_height_map(normals):
     ).astype(np.uint8)
 
 
+def compute_ao(height_map, normals, num_scales=4):
+    """Compute ambient occlusion from height map and normals.
+
+    Two components combined:
+      1. Multi-scale height occlusion — at each scale, pixels lower than their
+         neighborhood average are more occluded.
+      2. Cavity map — Laplacian of the height map.  Concave = occluded.
+      3. Normal-based occlusion — steep normals = occluded.
+
+    Result: 0 = fully occluded (black), 1 = fully exposed (white).
+    Returned as uint8 (0-255).
+    """
+    hf = height_map.astype(np.float32) / 255.0
+
+    # Multi-scale height occlusion
+    occlusion_scales = []
+    for i in range(num_scales):
+        radius = 3 + i * 4
+        ksize = radius * 2 + 1
+        local_mean = cv2.GaussianBlur(hf, (ksize, ksize), 0)
+        diff = np.clip(local_mean - hf, 0, None)
+        occlusion_scales.append(diff)
+
+    weights = [1.0, 0.7, 0.5, 0.3][:num_scales]
+    total_weight = sum(weights)
+    height_occ = sum(w * s for w, s in zip(weights, occlusion_scales)) / total_weight
+
+    # Cavity from Laplacian
+    laplacian = cv2.Laplacian(hf, cv2.CV_32F, ksize=5)
+    laplacian = cv2.GaussianBlur(laplacian, (5, 5), 0)
+    cavity = np.clip(-laplacian, 0, None)
+
+    # Normal-based occlusion
+    nz = normals[:, :, 2]
+    normal_occ = np.clip(1.0 - nz, 0, 1) ** 2
+
+    def robust_norm(arr):
+        p1, p99 = np.percentile(arr, 1), np.percentile(arr, 99)
+        if p99 - p1 < 1e-8:
+            return np.zeros_like(arr)
+        return np.clip((arr - p1) / (p99 - p1), 0, 1)
+
+    height_occ = robust_norm(height_occ)
+    cavity = robust_norm(cavity)
+    normal_occ = robust_norm(normal_occ)
+
+    combined_occ = 0.5 * height_occ + 0.3 * cavity + 0.2 * normal_occ
+    combined_occ = robust_norm(combined_occ)
+
+    ao = np.power(1.0 - combined_occ, 0.7)
+
+    log.info(f"  AO: min={ao.min():.3f} max={ao.max():.3f} mean={ao.mean():.3f}")
+
+    return (np.clip(ao, 0, 1) * 255).astype(np.uint8)
+
+
 def normalize_albedo(img, target_percentile=99.5, target_value=0.85):
     """Normalize albedo brightness, preserving original dtype precision."""
     if img.dtype == np.uint16:
@@ -1048,6 +1129,7 @@ def step3_pbr(cropped_paths, output_dir):
     gray_normals, gray_rho, gray_residual = photometric_stereo_grayscale(side_grays, L)
     gray_roughness = compute_roughness(gray_normals, gray_residual)
     gray_height = compute_height_map(gray_normals)
+    gray_ao = compute_ao(gray_height, gray_normals)
     gray_normals_rgb = visualize_normals(gray_normals)
 
     save_16bit(gray_albedo, gray_dir / "albedo.tiff")
@@ -1055,6 +1137,7 @@ def step3_pbr(cropped_paths, output_dir):
     save_16bit(normals_bgr, gray_dir / "normals.tiff")
     save_16bit(gray_roughness, gray_dir / "roughness.tiff")
     save_16bit(gray_height, gray_dir / "height_map.tiff")
+    save_16bit(gray_ao, gray_dir / "ao.tiff")
     log.info(f"  Saved grayscale PBR -> {gray_dir}")
 
     # ── Colored PBR ──
@@ -1066,6 +1149,7 @@ def step3_pbr(cropped_paths, output_dir):
     color_normals, color_rho, color_residual = photometric_stereo_color(side_colors, L)
     color_roughness = compute_roughness(color_normals, color_residual)
     color_height = compute_height_map(color_normals)
+    color_ao = compute_ao(color_height, color_normals)
     color_normals_rgb = visualize_normals(color_normals)
 
     # Calibrated albedo is already color-corrected by the 3x3 checker matrix.
@@ -1076,6 +1160,7 @@ def step3_pbr(cropped_paths, output_dir):
     save_16bit(color_normals_bgr, color_dir / "normals.tiff")
     save_16bit(color_roughness, color_dir / "roughness.tiff")
     save_16bit(color_height, color_dir / "height_map.tiff")
+    save_16bit(color_ao, color_dir / "ao.tiff")
     log.info(f"  Saved colored PBR -> {color_dir}")
 
     return color_dir
@@ -1153,8 +1238,8 @@ def main():
                         help="GLB model path for Blender step")
     parser.add_argument("--output", required=True,
                         help="Output directory")
-    parser.add_argument("--crop-size", type=int, default=2048,
-                        help="Crop size in pixels (default: 2048)")
+    parser.add_argument("--crop-size", type=int, default=3200,
+                        help="Crop size in pixels (default: 3200)")
     parser.add_argument("--batch",
                         help="Batch name for Blender (default: derived from filenames)")
     parser.add_argument("--blend-px", type=int, default=256,
@@ -1181,16 +1266,32 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Step 1: Calibration
-    matrix, calibrated_paths = step1_calibrate(input_dir, args.checker, output_dir)
+    matrix, calibrated_paths, checker_wb_raw, raw_files = step1_calibrate(input_dir, args.checker, output_dir)
     if not calibrated_paths:
         log.error("Step 1 failed -- no calibrated images produced")
         return 1
 
     # Step 2: Crop
-    cropped_paths = step2_crop(calibrated_paths, output_dir, args.crop_size)
-    if not cropped_paths:
+    result = step2_crop(calibrated_paths, output_dir, args.crop_size)
+    if not result or not result[0]:
         log.error("Step 2 failed -- no cropped images produced")
         return 1
+    cropped_paths, crop_info = result
+
+    # Save calibration.json (matches backend post_capture_service format)
+    cal_data = {
+        "profile_name": args.checker,
+        "checker_wb": checker_wb_raw,
+        "matrix_3x3": matrix.tolist(),
+        "crop_box": crop_info["crop_box"],
+        "crop_size": crop_info["crop_size"],
+        "raw_files": raw_files,
+        "top_image": crop_info["top_image"],
+        "created_at": datetime.now().isoformat(),
+    }
+    cal_json_path = output_dir / "calibration.json"
+    cal_json_path.write_text(json.dumps(cal_data, indent=2))
+    log.info(f"  Saved calibration.json -> {cal_json_path}")
 
     # Step 2b: Edge detection check (before tileable)
     step2b_edge_check(cropped_paths, output_dir)

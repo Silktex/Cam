@@ -96,10 +96,12 @@ class BatchCaptureService:
             # Collect raw capture info for deferred post-processing
             raw_captures = []
 
-            # Process each light: ON → stabilize → capture → switch
-            # First light needs full stabilization; subsequent lights overlap
-            # by turning on the next light right after capture (before turning
-            # off the current one), so the stabilization delay runs in parallel.
+            # Helper: run camera prep in executor (camera ops are blocking)
+            async def _prep_camera():
+                """Drain events + ensure camera is responsive."""
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(None, camera_service._drain_camera_events, 200)
+
             prev_light_id = None
             for step, light_info in enumerate(all_lights, start=1):
                 if self._state.should_cancel:
@@ -111,11 +113,13 @@ class BatchCaptureService:
                 light_name = light_info["name"]
                 suffix = light_info["suffix"]
 
-                # Turn on current light (previous is turned off after)
-                await self._set_light(light_id, on=True, brightness=100)
-                # Turn off previous light now (overlap with stabilization)
-                if prev_light_id is not None:
-                    await self._set_light(prev_light_id, on=False)
+                # Run light switch + camera prep concurrently
+                async def _switch_lights():
+                    if prev_light_id is not None:
+                        await self._set_light(prev_light_id, on=False)
+                    await self._set_light(light_id, on=True, brightness=100)
+
+                await asyncio.gather(_switch_lights(), _prep_camera())
                 logger.info(f"{light_name} ON")
 
                 # Report progress: waiting for light

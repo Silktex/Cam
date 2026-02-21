@@ -118,6 +118,16 @@ export default function LiveViewPanel() {
               alt="Live view"
               className="w-full h-full object-contain"
             />
+            {/* Camera-style focus overlays */}
+            <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+              {/* Center circle */}
+              <div className="w-[18%] aspect-square rounded-full border-2 border-red-500" />
+              {/* Center focus square */}
+              <div className="absolute w-[6%] aspect-square border-2 border-red-500" />
+              {/* Crosshair lines */}
+              <div className="absolute w-[2%] h-px bg-red-500" />
+              <div className="absolute h-[3%] w-px bg-red-500" />
+            </div>
             <div className="absolute top-3 left-3 flex items-center gap-1.5 px-2 py-1 bg-slate-900/80 backdrop-blur-sm rounded-md">
               <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse" />
               <span className="text-xs text-teal-400 font-medium">

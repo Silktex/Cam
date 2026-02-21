@@ -12,12 +12,14 @@ Usage:
     python scripts/calibrate_and_crop.py \
       --profile media/colorchecker/profiles/CHECKER-17FEB.npz \
       --batch MALVERN-SEAGREEN \
-      --crop-size 2048
+      --crop-size 3000
 """
 
 import argparse
+import json
 import logging
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import cv2
@@ -242,7 +244,7 @@ def step1_calibrate(profile_path, raw_dir, output_dir):
         log.info(f"  Saved: {tiff_path}")
 
     log.info(f"\n  Calibration complete: {len(calibrated_paths)} images -> {cal_dir}")
-    return matrix, calibrated_paths
+    return matrix, calibrated_paths, checker_wb_raw, [f.name for f in fabric_arws]
 
 
 def step2_crop(calibrated_paths, output_dir, crop_size):
@@ -279,6 +281,16 @@ def step2_crop(calibrated_paths, output_dir, crop_size):
         cx = (x1 + x2) // 2
         cy = (y1 + y2) // 2
         log.info(f"  Detected boundary: ({x1},{y1})->({x2},{y2}), center=({cx},{cy})")
+        # Clamp crop_size to detected boundary (anomaly: fabric smaller than requested crop)
+        detected_w = x2 - x1
+        detected_h = y2 - y1
+        detected_size = max(detected_w, detected_h)
+        if detected_size < crop_size:
+            log.info(f"  Detected region ({detected_size}px) smaller than crop_size ({crop_size}px), shrinking crop")
+            crop_size = detected_size
+
+    # Clamp to image dims
+    crop_size = min(crop_size, w, h)
 
     # Compute crop box
     half = crop_size // 2
@@ -308,7 +320,21 @@ def step2_crop(calibrated_paths, output_dir, crop_size):
         log.info(f"  Cropped: {cal_path.name} -> {cropped.shape[1]}x{cropped.shape[0]}")
 
     log.info(f"\n  Crop complete: {len(cropped_paths)} images -> {crop_dir}")
-    return cropped_paths
+
+    # Find top image name for calibration.json
+    top_name = top_path.stem.split("/")[-1]
+    for p in calibrated_paths:
+        if "_top" in p.name.lower():
+            # Use the original RAW name (replace .tiff with .ARW)
+            top_name = p.stem + ".ARW"
+            break
+
+    crop_info = {
+        "crop_box": {"x1": int(crop_x1), "y1": int(crop_y1), "x2": int(crop_x2), "y2": int(crop_y2)},
+        "crop_size": int(crop_x2 - crop_x1),
+        "top_image": top_name,
+    }
+    return cropped_paths, crop_info
 
 
 # ── Main ─────────────────────────────────────────────────────────────────
@@ -323,8 +349,8 @@ def main():
                         help="Batch folder name under media/captures/ (e.g. MALVERN-SEAGREEN)")
     parser.add_argument("--output",
                         help="Output directory (default: media/captures/<batch>/output)")
-    parser.add_argument("--crop-size", type=int, default=2048,
-                        help="Crop size in pixels (default: 2048)")
+    parser.add_argument("--crop-size", type=int, default=3000,
+                        help="Crop size in pixels (default: 3000)")
     args = parser.parse_args()
 
     profile_path = Path(args.profile).expanduser().resolve()
@@ -350,16 +376,32 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Step 1: Calibrate
-    matrix, calibrated_paths = step1_calibrate(profile_path, raw_dir, output_dir)
+    matrix, calibrated_paths, checker_wb_raw, raw_files = step1_calibrate(profile_path, raw_dir, output_dir)
     if not calibrated_paths:
         log.error("Calibration failed — no images produced")
         return 1
 
     # Step 2: Crop
-    cropped_paths = step2_crop(calibrated_paths, output_dir, args.crop_size)
-    if not cropped_paths:
+    result = step2_crop(calibrated_paths, output_dir, args.crop_size)
+    if not result or not result[0]:
         log.error("Crop failed — no images produced")
         return 1
+    cropped_paths, crop_info = result
+
+    # Save calibration.json (matches backend post_capture_service format)
+    cal_data = {
+        "profile_name": profile_path.name,
+        "checker_wb": checker_wb_raw,
+        "matrix_3x3": matrix.tolist(),
+        "crop_box": crop_info["crop_box"],
+        "crop_size": crop_info["crop_size"],
+        "raw_files": raw_files,
+        "top_image": crop_info["top_image"],
+        "created_at": datetime.now().isoformat(),
+    }
+    cal_json_path = output_dir / "calibration.json"
+    cal_json_path.write_text(json.dumps(cal_data, indent=2))
+    log.info(f"  Saved calibration.json -> {cal_json_path}")
 
     # Summary
     log.info("\n" + "=" * 70)

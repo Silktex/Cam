@@ -90,7 +90,7 @@ class CameraService:
 
         if killed:
             logger.info(f"Killed USB-grabbing processes: {killed}")
-            time.sleep(0.3)
+            time.sleep(1.5)  # macOS respawns these fast — need enough delay
 
         return killed
 
@@ -229,47 +229,49 @@ class CameraService:
                     "message": "Already connected"
                 }
             
-            # Kill PTP grabbers first
+            # Kill PTP grabbers with double-kill to beat macOS respawn
             self.kill_ptp_processes()
+            time.sleep(1.0)
+            self.kill_ptp_processes()  # kill the respawned ones
             time.sleep(0.5)
-            
+
             # Try to connect with retries
             max_retries = 3
             last_error = None
-            
+
             for attempt in range(max_retries):
                 try:
                     logger.info(f"Connection attempt {attempt + 1}/{max_retries}")
-                    
+
                     self._context = gp.Context()
                     self._camera = gp.Camera()
                     self._camera.init(self._context)
-                    
+
                     # Get camera model
                     abilities = self._camera.get_abilities()
                     self._model = abilities.model
                     self._connected = True
-                    
-                    # Set manual focus to prevent AF blocking shutter
-                    self._set_manual_focus()
-                    
+                    self._set_autofocus()
+
                     logger.info(f"✓ Connected to {self._model}")
                     event_bus.publish(EventType.CAMERA_CONNECTED, {"model": self._model})
-                    
+
                     return {
                         "success": True,
                         "connected": True,
                         "model": self._model,
                         "message": f"Connected to {self._model}"
                     }
-                    
+
                 except gp.GPhoto2Error as e:
                     last_error = e
                     logger.warning(f"Attempt {attempt + 1} failed: {e}")
                     self._cleanup_camera()
                     if attempt < max_retries - 1:
                         self.kill_ptp_processes()
-                        time.sleep(1)
+                        time.sleep(1.0)
+                        self.kill_ptp_processes()
+                        time.sleep(0.5)
             
             error_msg = f"Failed to connect after {max_retries} attempts: {last_error}"
             logger.error(error_msg)
@@ -305,16 +307,16 @@ class CameraService:
         self._connected = False
         self._model = None
     
-    def _set_manual_focus(self):
-        """Set camera to manual focus to prevent AF blocking shutter"""
+    def _set_autofocus(self):
+        """Set camera to autofocus mode"""
         try:
             config = self._camera.get_config(self._context)
             focus_widget = config.get_child_by_name("focusmode")
-            focus_widget.set_value("Manual")
+            focus_widget.set_value("Automatic")
             self._camera.set_config(config, self._context)
-            logger.info("Set focus mode to Manual")
+            logger.info("Set focus mode to Automatic")
         except Exception as e:
-            logger.debug(f"Could not set manual focus: {e}")
+            logger.debug(f"Could not set autofocus: {e}")
     
     def get_status(self) -> Dict[str, Any]:
         """Get camera status without locking"""
@@ -529,7 +531,6 @@ class CameraService:
                         abilities = self._camera.get_abilities()
                         self._model = abilities.model
                         self._connected = True
-                        self._set_manual_focus()
                         logger.info(f"Reconnected for capture attempt {attempt + 1}")
                         time.sleep(0.3)  # Let camera stabilize after reconnect
                     except gp.GPhoto2Error as e:
@@ -677,7 +678,7 @@ class CameraService:
         except Exception as e:
             logger.debug(f"Event drain error (ok): {e}")
     
-    def _wait_for_camera_ready(self, max_wait: float = 5.0):
+    def _wait_for_camera_ready(self, max_wait: float = 10.0):
         """Wait for camera to finish processing (e.g., after RAW capture)"""
         if not self._camera or not self._context:
             return
@@ -685,7 +686,7 @@ class CameraService:
         start_time = time.time()
         while time.time() - start_time < max_wait:
             try:
-                event_type, event_data = self._camera.wait_for_event(200)
+                event_type, event_data = self._camera.wait_for_event(500)
                 if event_type == gp.GP_EVENT_TIMEOUT:
                     # No more events, camera is idle
                     break

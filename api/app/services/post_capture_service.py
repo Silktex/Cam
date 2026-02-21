@@ -148,10 +148,8 @@ class PostCaptureService:
             if top_arw is None:
                 raise ValueError("No top image found among RAW files")
 
-            # ── Calibrate ONLY the top image ──
+            # ── Calibrate top image in memory (no file saved) ──
             job.current_step = "calibrating_top"
-            cal_dir = output_dir / "calibrated"
-            cal_dir.mkdir(parents=True, exist_ok=True)
 
             img, _ = _load_raw_linear(top_arw, fixed_wb=checker_wb_raw)
             h, w, _ = img.shape
@@ -162,18 +160,15 @@ class PostCaptureService:
             srgb = _linear_to_srgb(corrected)
             srgb_16 = (srgb * 65535).astype(np.uint16)
             bgr_16 = cv2.cvtColor(srgb_16, cv2.COLOR_RGB2BGR)
-
-            top_tiff = cal_dir / f"{top_arw.stem}.tiff"
-            cv2.imwrite(str(top_tiff), bgr_16)
+            bgr_16 = _sharpen_16(bgr_16)
             job.calibrated_count = 1
-            logger.info(f"[{batch}] Calibrated top: {top_arw.name}")
+            logger.info(f"[{batch}] Calibrated top in memory: {top_arw.name}")
 
             # ── Detect boundary on calibrated top → compute crop box ──
             job.current_step = "detecting_boundary"
-            top_img = cv2.imread(str(top_tiff), cv2.IMREAD_UNCHANGED)
-            bbox = _detect_fabric_boundary(top_img)
+            bbox = _detect_fabric_boundary(bgr_16)
 
-            h, w = top_img.shape[:2]
+            h, w = bgr_16.shape[:2]
             if bbox is None:
                 cx, cy = w // 2, h // 2
             else:
@@ -189,17 +184,6 @@ class PostCaptureService:
                 crop_x1 = max(0, crop_x2 - job.crop_size)
             if crop_y2 - crop_y1 < job.crop_size:
                 crop_y1 = max(0, crop_y2 - job.crop_size)
-
-            # ── Crop ONLY the top image ──
-            job.current_step = "cropping_top"
-            crop_dir = output_dir / "cropped"
-            crop_dir.mkdir(parents=True, exist_ok=True)
-
-            cropped = top_img[crop_y1:crop_y2, crop_x1:crop_x2]
-            crop_out = crop_dir / f"{top_arw.stem}.tiff"
-            cv2.imwrite(str(crop_out), cropped)
-            job.cropped_count = 1
-            logger.info(f"[{batch}] Cropped top: {top_arw.name}")
 
             # ── Save calibration.json for on-demand rendering ──
             job.current_step = "saving_calibration"
@@ -226,7 +210,7 @@ class PostCaptureService:
             job.status = "completed"
             job.completed_at = datetime.now().isoformat()
             job.current_step = "done"
-            logger.info(f"[{batch}] Processing complete: top calibrated + cropped, {len(fabric_arws) - 1} on-demand")
+            logger.info(f"[{batch}] Processing complete: calibration.json saved, {len(fabric_arws)} images available on-demand")
 
         except Exception as e:
             job.status = "failed"
@@ -256,7 +240,7 @@ def _load_raw_linear(raw_path, fixed_wb=None):
             wb_params = dict(use_camera_wb=True)
         rgb = raw.postprocess(
             **wb_params,
-            demosaic_algorithm=rawpy.DemosaicAlgorithm.AHD,
+            demosaic_algorithm=rawpy.DemosaicAlgorithm.DHT,
             output_bps=16,
             output_color=rawpy.ColorSpace.sRGB,
             no_auto_bright=True,
@@ -275,6 +259,29 @@ def _linear_to_srgb(img):
         img * 12.92,
         1.055 * np.power(np.clip(img, 0.0031308, None), 1.0 / 2.4) - 0.055,
     ).clip(0, 1)
+
+
+def _sharpen_16(bgr_16):
+    """Capture sharpening on 16-bit BGR — matches camera-embedded JPEG sharpness.
+
+    Two-pass unsharp mask:
+      1. Detail pass  (sigma=0.8, amount=0.7) — recovers fine texture/threads
+      2. Structure pass (sigma=2.0, amount=0.3) — restores micro-contrast
+    """
+    import cv2
+    import numpy as np
+
+    img = bgr_16.astype(np.float32)
+
+    # Pass 1: detail (tight radius)
+    blur1 = cv2.GaussianBlur(img, (0, 0), sigmaX=0.8)
+    img = img + 0.7 * (img - blur1)
+
+    # Pass 2: structure (wider radius)
+    blur2 = cv2.GaussianBlur(img, (0, 0), sigmaX=2.0)
+    img = img + 0.3 * (img - blur2)
+
+    return np.clip(img, 0, 65535).astype(np.uint16)
 
 
 def _compute_3x3_matrix(detected, reference):
@@ -404,6 +411,7 @@ def render_image(batch: str, filename: str, fmt: str = "jpg", crop: bool = True)
     srgb = _linear_to_srgb(corrected)
     srgb_16 = (srgb * 65535).astype(np.uint16)
     bgr_16 = cv2.cvtColor(srgb_16, cv2.COLOR_RGB2BGR)
+    bgr_16 = _sharpen_16(bgr_16)
 
     # Apply crop if requested
     if crop:

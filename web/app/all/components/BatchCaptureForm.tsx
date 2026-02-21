@@ -8,7 +8,9 @@ import {
   Loader2,
   CheckCircle,
   AlertCircle,
+  Sun,
 } from 'lucide-react';
+import { api } from '@/lib/api';
 
 interface CaptureInfo {
   step: number;
@@ -46,7 +48,7 @@ export default function BatchCaptureForm() {
   const [folder, setFolder] = useState(defaultFolder);
   const [prefix, setPrefix] = useState(defaultFolder);
   const [prefixTouched, setPrefixTouched] = useState(false);
-  const [lightDelay, setLightDelay] = useState(2.0);
+  const [lightDelay, setLightDelay] = useState(0.5);
   const folderInputRef = useRef<HTMLInputElement>(null);
 
   const [isRunning, setIsRunning] = useState(false);
@@ -56,6 +58,13 @@ export default function BatchCaptureForm() {
 
   const [toast, setToast] = useState<string | null>(null);
 
+  // Next batch prep (editable while current is running)
+  const [nextFolder, setNextFolder] = useState('');
+  const [nextPrefix, setNextPrefix] = useState('');
+  const [nextPrefixTouched, setNextPrefixTouched] = useState(false);
+  const [nextDelay, setNextDelay] = useState(0.5);
+  const [topLightAfter, setTopLightAfter] = useState(true);
+
   const wsRef = useRef<WebSocket | null>(null);
 
   const startBatchCapture = useCallback(() => {
@@ -63,6 +72,13 @@ export default function BatchCaptureForm() {
     setProgress(null);
     setResult(null);
     setError(null);
+
+    // Pre-fill next batch with prefix from current folder (e.g. "MALVERN-GREEN" → "MALVERN-")
+    const dashIdx = folder.lastIndexOf('-');
+    const nextPre = dashIdx > 0 ? folder.substring(0, dashIdx + 1) : '';
+    setNextFolder(nextPre);
+    setNextPrefix(nextPre);
+    setNextPrefixTouched(false);
 
     const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000';
     const ws = new WebSocket(`${wsUrl}/api/batch/ws`);
@@ -100,6 +116,10 @@ export default function BatchCaptureForm() {
           setIsRunning(false);
           setToast('Capture complete. Calibration & crop queued.');
           setTimeout(() => setToast(null), 5000);
+          // Turn on top light for next sample placement
+          if (topLightAfter) {
+            api.post('/api/lights/0', { on: true, brightness: 100 }).catch(() => {});
+          }
           ws.close();
           break;
         case 'error':
@@ -123,7 +143,7 @@ export default function BatchCaptureForm() {
     ws.onclose = () => {
       wsRef.current = null;
     };
-  }, [folder, prefix, lightDelay]);
+  }, [folder, prefix, lightDelay, topLightAfter]);
 
   const cancelBatchCapture = useCallback(() => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -159,7 +179,7 @@ export default function BatchCaptureForm() {
     const handleSave = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 's') {
         e.preventDefault();
-        if (!isRunning && !result) {
+        if (!isRunning) {
           startBatchCapture();
         }
       }
@@ -167,6 +187,24 @@ export default function BatchCaptureForm() {
     window.addEventListener('keydown', handleSave);
     return () => window.removeEventListener('keydown', handleSave);
   });
+
+  // When batch completes, apply next batch values so the config form shows pre-filled
+  useEffect(() => {
+    if (!result) return;
+    const useNext = nextFolder.trim() !== '';
+    const newFolder = useNext ? nextFolder.trim() : `batch_${Date.now()}`;
+    const newPrefix = useNext && nextPrefix.trim() ? nextPrefix.trim() : newFolder;
+    setFolder(newFolder);
+    setPrefix(newPrefix);
+    setPrefixTouched(useNext && nextPrefixTouched);
+    if (useNext) setLightDelay(nextDelay);
+    setNextFolder('');
+    setNextPrefix('');
+    setNextPrefixTouched(false);
+    // Auto-dismiss the completion banner after 30s
+    const timer = setTimeout(() => { setResult(null); setToast(null); }, 30000);
+    return () => clearTimeout(timer);
+  }, [result]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleFolderChange = (value: string) => {
     setFolder(value);
@@ -197,9 +235,39 @@ export default function BatchCaptureForm() {
   };
 
   // Config state
-  if (!isRunning && !result) {
+  if (!isRunning) {
     return (
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+        {/* Completion banner */}
+        {result && (
+          <div className={`mb-4 p-3 rounded-lg flex items-center gap-2 ${result.success ? 'bg-teal-500/10 border border-teal-500/30' : 'bg-red-500/10 border border-red-500/30'}`}>
+            {result.success ? (
+              <CheckCircle className="w-4 h-4 text-teal-400 flex-shrink-0" />
+            ) : (
+              <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0" />
+            )}
+            <div className="flex-1 min-w-0">
+              <span className={`text-sm font-medium ${result.success ? 'text-teal-300' : 'text-red-300'}`}>
+                {result.success
+                  ? `${result.folder}: ${result.total_captures} captures in ${result.duration_seconds.toFixed(1)}s`
+                  : `${result.folder}: completed with errors`}
+              </span>
+              {result.errors.length > 0 && (
+                <p className="text-xs text-red-400 mt-0.5 truncate">{result.errors[0]}</p>
+              )}
+              {toast && (
+                <p className="text-xs text-slate-400 mt-0.5">{toast}</p>
+              )}
+            </div>
+            <button
+              onClick={() => { setResult(null); setToast(null); }}
+              className="text-xs text-slate-400 hover:text-white flex-shrink-0"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
         <div className="flex items-center gap-2 mb-4">
           <Camera className="w-5 h-5 text-teal-400" />
           <h2 className="text-base font-semibold text-white">Batch Capture</h2>
@@ -377,70 +445,53 @@ export default function BatchCaptureForm() {
             {progress.captures.length} captured
           </p>
         </div>
-      </div>
-    );
-  }
 
-  // Result state
-  if (result) {
-    return (
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-        <div className="flex items-center gap-3 mb-3">
-          {result.success ? (
-            <CheckCircle className="w-6 h-6 text-teal-400" />
-          ) : (
-            <AlertCircle className="w-6 h-6 text-red-400" />
-          )}
-          <div>
-            <h2 className="text-base font-semibold text-white">
-              {result.success
-                ? 'Batch Complete!'
-                : 'Finished with Errors'}
-            </h2>
-            <p className="text-xs text-slate-400">
-              {result.total_captures} images in{' '}
-              {result.duration_seconds.toFixed(1)}s
-            </p>
+        {/* Next batch prep */}
+        <div className="mt-4 pt-4 border-t border-slate-800">
+          <p className="text-xs font-medium text-slate-400 mb-2">Prepare Next Batch</p>
+          <div className="space-y-2">
+            <input
+              type="text"
+              value={nextFolder}
+              onChange={(e) => {
+                setNextFolder(e.target.value);
+                if (!nextPrefixTouched) setNextPrefix(e.target.value);
+              }}
+              className="w-full px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 text-xs focus:border-teal-500 focus:ring-1 focus:ring-teal-500 focus:outline-none"
+              placeholder="Next folder name"
+            />
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={nextPrefix}
+                onChange={(e) => { setNextPrefixTouched(true); setNextPrefix(e.target.value); }}
+                className="flex-1 px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 text-xs focus:border-teal-500 focus:ring-1 focus:ring-teal-500 focus:outline-none"
+                placeholder="Prefix"
+              />
+              <input
+                type="number"
+                value={nextDelay}
+                onChange={(e) => setNextDelay(parseFloat(e.target.value))}
+                min={0.1}
+                max={10}
+                step={0.1}
+                className="w-20 px-2 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-white text-xs focus:border-teal-500 focus:ring-1 focus:ring-teal-500 focus:outline-none"
+                title="Light delay (s)"
+              />
+            </div>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <button
+                type="button"
+                onClick={() => setTopLightAfter(!topLightAfter)}
+                className={`w-8 h-4 rounded-full transition-colors relative ${topLightAfter ? 'bg-teal-600' : 'bg-slate-700'}`}
+              >
+                <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${topLightAfter ? 'left-4' : 'left-0.5'}`} />
+              </button>
+              <Sun className="w-3 h-3 text-slate-400" />
+              <span className="text-xs text-slate-400">Top light on after capture</span>
+            </label>
           </div>
         </div>
-
-        {result.errors.length > 0 && (
-          <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-2 mb-3">
-            <p className="text-xs text-red-300">
-              {result.errors.join(', ')}
-            </p>
-          </div>
-        )}
-
-        <div className="flex gap-2">
-          <button
-            onClick={() => {
-              const newFolder = `batch_${Date.now()}`;
-              setResult(null);
-              setToast(null);
-              setFolder(newFolder);
-              setPrefix(newFolder);
-              setPrefixTouched(false);
-            }}
-            className="flex-1 py-2 text-sm font-medium bg-teal-600 text-white rounded-lg hover:bg-teal-500 transition-colors"
-          >
-            New Batch
-          </button>
-          <a
-            href={`/gallery?folder=${result.folder}`}
-            className="flex-1 py-2 text-sm font-medium text-center bg-slate-800 text-slate-300 rounded-lg hover:bg-slate-700 transition-colors"
-          >
-            View Gallery
-          </a>
-        </div>
-
-        {/* Toast notification */}
-        {toast && (
-          <div className="mt-3 p-2.5 bg-teal-500/10 border border-teal-500/30 rounded-lg flex items-center gap-2">
-            <CheckCircle className="w-3.5 h-3.5 text-teal-400 flex-shrink-0" />
-            <span className="text-xs text-teal-300">{toast}</span>
-          </div>
-        )}
       </div>
     );
   }
