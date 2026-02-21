@@ -22,4 +22,5 @@ node_modules/
 
 # Media (optional - uncomment to ignore captured files)
 api/media/
+!api/media/colorchecker/profiles/
 api/data/

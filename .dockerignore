@@ -1,5 +1,6 @@
 media/
 **/media/
+!api/media/colorchecker/
 *.pyc
 __pycache__/
 .git/
