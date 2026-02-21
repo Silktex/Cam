@@ -84,6 +84,10 @@ COPY --from=web-builder /build/web/package.json /app/web/package.json
 # Create persistent data directories
 RUN mkdir -p /app/api/media /app/api/data /app/api/models
 
+# Seed colorchecker profiles into image (volume mount will shadow api/media,
+# so we stash them separately and copy at startup via entrypoint)
+COPY api/media/colorchecker /app/seed/colorchecker
+
 # Copy entrypoint
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh

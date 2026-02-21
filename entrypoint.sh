@@ -2,6 +2,13 @@
 set -e
 
 echo "=== Camera Control System ==="
+
+# Seed colorchecker profiles into mounted media volume if missing
+if [ -d /app/seed/colorchecker ] && [ ! -d /app/api/media/colorchecker/profiles ]; then
+  echo "Seeding colorchecker profiles into media volume..."
+  cp -r /app/seed/colorchecker /app/api/media/colorchecker
+fi
+
 echo "Starting API server on :8000 and Web UI on :3000"
 
 # Start API server in background
