@@ -4,6 +4,8 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import Link from 'next/link';
 import { Camera, ArrowLeft, Play, Square, Loader2, CheckCircle, AlertCircle, Lightbulb } from 'lucide-react';
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 interface CaptureInfo {
   step: number;
   light_id: number;
@@ -35,10 +37,17 @@ interface BatchResult {
   errors: string[];
 }
 
+interface ProfileInfo {
+  name: string;
+  created_at?: string;
+}
+
 export default function BatchCapturePage() {
   const [folder, setFolder] = useState(`batch_${Date.now()}`);
   const [prefix, setPrefix] = useState('capture');
   const [lightDelay, setLightDelay] = useState(2.0);
+  const [profile, setProfile] = useState('CHECKER-17FEB.npz');
+  const [profiles, setProfiles] = useState<ProfileInfo[]>([]);
 
   const [isRunning, setIsRunning] = useState(false);
   const [progress, setProgress] = useState<BatchProgress | null>(null);
@@ -63,7 +72,8 @@ export default function BatchCapturePage() {
         action: 'start',
         folder,
         prefix,
-        light_stabilize_delay: lightDelay
+        light_stabilize_delay: lightDelay,
+        profile
       }));
     };
 
@@ -117,12 +127,24 @@ export default function BatchCapturePage() {
       console.log('Batch capture WebSocket closed');
       wsRef.current = null;
     };
-  }, [folder, prefix, lightDelay]);
+  }, [folder, prefix, lightDelay, profile]);
 
   const cancelBatchCapture = useCallback(() => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ action: 'cancel' }));
     }
+  }, []);
+
+  // Fetch available profiles on mount
+  useEffect(() => {
+    fetch(`${API_URL}/api/colorchecker/profiles`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.profiles && data.profiles.length > 0) {
+          setProfiles(data.profiles);
+        }
+      })
+      .catch(err => console.error('Failed to fetch profiles:', err));
   }, []);
 
   // Cleanup on unmount
@@ -213,7 +235,7 @@ export default function BatchCapturePage() {
               Capture Settings
             </h2>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
               <div>
                 <label className="block text-sm text-slate-400 mb-2">Folder Name</label>
                 <input
@@ -233,6 +255,23 @@ export default function BatchCapturePage() {
                   className="w-full px-4 py-2 bg-slate-700 rounded-xl border border-slate-600 focus:border-teal-500 focus:outline-none"
                   placeholder="capture"
                 />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400 mb-2">Calibration Profile</label>
+                <select
+                  value={profile}
+                  onChange={(e) => setProfile(e.target.value)}
+                  className="w-full px-4 py-2 bg-slate-700 rounded-xl border border-slate-600 focus:border-teal-500 focus:outline-none appearance-none"
+                >
+                  {profiles.length === 0 && (
+                    <option value="CHECKER-17FEB.npz">CHECKER-17FEB</option>
+                  )}
+                  {profiles.map((p) => (
+                    <option key={p.name} value={p.name.endsWith('.npz') ? p.name : `${p.name}.npz`}>
+                      {p.name.replace('.npz', '')}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="block text-sm text-slate-400 mb-2">Light Stabilize Delay (s)</label>

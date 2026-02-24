@@ -59,6 +59,15 @@ async def troubleshoot_camera():
     )
 
 
+@router.post("/autofocus")
+async def trigger_autofocus():
+    """Trigger autofocus (works during live view)"""
+    result = camera_service.trigger_autofocus()
+    if not result.get("success"):
+        raise HTTPException(status_code=500, detail=result.get("error"))
+    return result
+
+
 @router.get("/settings")
 async def get_camera_settings():
     """Get all camera settings"""

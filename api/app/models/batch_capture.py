@@ -20,6 +20,7 @@ class BatchCaptureProgress(BaseModel):
     current_light: str = Field(..., description="Current side light name")
     status: str = Field(..., description="Status: waiting_light, capturing, processing, complete, error")
     message: str = Field(..., description="Human-readable status message")
+    phase: str = Field(default="capturing", description="Phase: capturing or downloading")
     captures: List[str] = Field(default_factory=list, description="List of captured filenames so far")
 
 

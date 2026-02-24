@@ -252,6 +252,7 @@ class CameraService:
                     self._model = abilities.model
                     self._connected = True
                     self._set_autofocus()
+                    self._set_single_shot()
 
                     logger.info(f"✓ Connected to {self._model}")
                     event_bus.publish(EventType.CAMERA_CONNECTED, {"model": self._model})
@@ -317,6 +318,21 @@ class CameraService:
             logger.info("Set focus mode to Automatic")
         except Exception as e:
             logger.debug(f"Could not set autofocus: {e}")
+
+    def _set_single_shot(self):
+        """Ensure camera is in Single Shot mode (not bracket/burst)"""
+        try:
+            config = self._camera.get_config(self._context)
+            mode_widget = config.get_child_by_name("capturemode")
+            current = mode_widget.get_value()
+            if current != "Single Shot":
+                mode_widget.set_value("Single Shot")
+                self._camera.set_config(config, self._context)
+                logger.info(f"Set capture mode to Single Shot (was: {current})")
+            else:
+                logger.info("Capture mode already Single Shot")
+        except Exception as e:
+            logger.debug(f"Could not set single shot mode: {e}")
     
     def get_status(self) -> Dict[str, Any]:
         """Get camera status without locking"""
@@ -581,9 +597,10 @@ class CameraService:
                     file_size = local_path.stat().st_size
                     logger.info(f"Saved: {local_path} ({file_size} bytes)")
                     
-                    # Delete from camera
+                    # Delete from camera SDRAM to free buffer
                     try:
                         self._camera.file_delete(file_path.folder, file_path.name)
+                        logger.debug(f"Deleted from camera: {file_path.name}")
                     except Exception as del_err:
                         logger.warning(f"Could not delete from camera: {del_err}")
                     
@@ -620,7 +637,237 @@ class CameraService:
             error_msg = f"Capture failed after {max_retries} attempts: {last_error}"
             logger.error(error_msg)
             return {"success": False, "error": error_msg}
-    
+
+    def capture_only(self) -> Dict[str, Any]:
+        """Capture image to SD card without downloading.
+
+        Triggers shutter, waits for camera ready, returns the camera-side
+        file path.  Does NOT download, save locally, or delete from camera.
+        Used for two-phase batch capture (capture all, then bulk download).
+        """
+        # Stop live view first (outside lock to avoid deadlock)
+        if self._live_view_active:
+            self._stop_live_view.set()
+            for _ in range(30):
+                if not self._live_view_active:
+                    break
+                time.sleep(0.1)
+            time.sleep(0.5)
+
+        with self._lock:
+            max_retries = 3
+            last_error = None
+
+            for attempt in range(max_retries):
+                # Ensure connection before each attempt
+                if not self._connected or not self._camera:
+                    self.kill_ptp_processes()
+                    time.sleep(0.5)
+                    try:
+                        self._context = gp.Context()
+                        self._camera = gp.Camera()
+                        self._camera.init(self._context)
+                        abilities = self._camera.get_abilities()
+                        self._model = abilities.model
+                        self._connected = True
+                        logger.info(f"Reconnected for capture_only attempt {attempt + 1}")
+                        time.sleep(0.3)
+                    except gp.GPhoto2Error as e:
+                        last_error = e
+                        logger.warning(f"Reconnect failed on attempt {attempt + 1}: {e}")
+                        time.sleep(1)
+                        continue
+
+                try:
+                    self._drain_camera_events()
+
+                    t0 = time.time()
+                    file_path = self._camera.capture(gp.GP_CAPTURE_IMAGE)
+                    t1 = time.time()
+
+                    # Wait for camera ready and capture SD card path from FILE_ADDED event.
+                    # capture() returns a PTP buffer path (folder="/") which becomes
+                    # inaccessible after subsequent captures.  The FILE_ADDED event
+                    # carries the real SD card path that stays downloadable.
+                    camera_folder = file_path.folder
+                    camera_filename = file_path.name
+                    start_wait = time.time()
+                    while time.time() - start_wait < 10.0:
+                        try:
+                            event_type, event_data = self._camera.wait_for_event(500)
+                            if event_type == gp.GP_EVENT_TIMEOUT:
+                                break
+                            elif event_type == gp.GP_EVENT_FILE_ADDED:
+                                camera_folder = event_data.folder
+                                camera_filename = event_data.name
+                                logger.info(f"capture_only SD path: {camera_folder}/{camera_filename}")
+                            elif event_type == gp.GP_EVENT_CAPTURE_COMPLETE:
+                                break
+                        except Exception as e:
+                            logger.debug(f"capture_only wait error: {e}")
+                            break
+
+                    t2 = time.time()
+                    logger.info(f"capture_only: {camera_folder}/{camera_filename} "
+                                f"(shutter={t1-t0:.2f}s wait={t2-t1:.2f}s)")
+
+                    return {
+                        "success": True,
+                        "camera_folder": camera_folder,
+                        "camera_filename": camera_filename,
+                    }
+
+                except gp.GPhoto2Error as e:
+                    last_error = e
+                    logger.warning(f"capture_only attempt {attempt + 1} failed: {e}")
+                    self._cleanup_camera()
+                    if attempt < max_retries - 1:
+                        time.sleep(1.5)
+
+            error_msg = f"capture_only failed after {max_retries} attempts: {last_error}"
+            logger.error(error_msg)
+            return {"success": False, "error": error_msg}
+
+    def download_from_camera(self, camera_folder: str, camera_filename: str,
+                             folder: str, prefix: str, suffix: str,
+                             skip_post_process: bool = False) -> Dict[str, Any]:
+        """Download a previously captured file from the camera SD card.
+
+        Args:
+            camera_folder: Camera-side folder path (from capture_only)
+            camera_filename: Camera-side filename (from capture_only)
+            folder: Local capture session folder name
+            prefix: Filename prefix (e.g., 'batch')
+            suffix: Suffix before extension (e.g., 'top', 'side_1')
+            skip_post_process: If True, skip inline post-processing
+        """
+        with self._lock:
+            if not self._connected or not self._camera:
+                return {"success": False, "error": "Camera not connected"}
+
+            folder_path = settings.CAPTURES_DIR / folder
+            raw_path = folder_path / "raw"
+            raw_path.mkdir(parents=True, exist_ok=True)
+
+            try:
+                t0 = time.time()
+                camera_file = self._camera.file_get(
+                    camera_folder,
+                    camera_filename,
+                    gp.GP_FILE_TYPE_NORMAL
+                )
+                t1 = time.time()
+
+                ext = Path(camera_filename).suffix or ".ARW"
+                suffix_part = f"_{suffix}" if suffix else ""
+                base_name = f"{prefix}{suffix_part}"
+                local_filename = f"{base_name}{ext}"
+                local_path = raw_path / local_filename
+
+                counter = 1
+                while local_path.exists():
+                    local_filename = f"{base_name}({counter}){ext}"
+                    local_path = raw_path / local_filename
+                    counter += 1
+
+                camera_file.save(str(local_path))
+                file_size = local_path.stat().st_size
+                t2 = time.time()
+                logger.info(f"Downloaded: {local_path} ({file_size} bytes, download={t1-t0:.2f}s save={t2-t1:.2f}s)")
+
+                # Delete from camera
+                try:
+                    self._camera.file_delete(camera_folder, camera_filename)
+                except Exception as del_err:
+                    logger.warning(f"Could not delete from camera: {del_err}")
+
+                # Post-process
+                processed = {}
+                if not skip_post_process:
+                    processed = self._post_process_image(folder_path, local_filename, ext)
+
+                return {
+                    "success": True,
+                    "filename": local_filename,
+                    "filepath": str(local_path),
+                    "folder_path": str(folder_path),
+                    "ext": ext,
+                    "file_url": f"/media/captures/{folder}/raw/{local_filename}",
+                    "file_size": file_size,
+                    "captured_at": datetime.now().isoformat(),
+                    "jpg_url": processed.get("jpg_url"),
+                }
+
+            except gp.GPhoto2Error as e:
+                error_msg = f"Download failed for {camera_folder}/{camera_filename}: {e}"
+                logger.error(error_msg)
+                return {"success": False, "error": error_msg}
+
+    def trigger_autofocus(self) -> Dict[str, Any]:
+        """Trigger autofocus on Sony A7R III.
+
+        Uses gphoto2's 'autofocus' action toggle which maps to Sony's
+        SetControlDeviceB PTP command internally.  Set value 1 to engage
+        AF (equivalent to half-shutter press), hold 1.5s for the lens to
+        lock, then set 2 to release.
+
+        Drains pending PTP events first to ensure the camera session is
+        clean (stale events after batch capture can block AF commands).
+        """
+        with self._lock:
+            if not self._connected or not self._camera:
+                return {"success": False, "error": "Camera not connected"}
+
+            try:
+                self._drain_camera_events(timeout_ms=50)
+                config = self._camera.get_config(self._context)
+
+                # Ensure AF mode
+                focus_widget = config.get_child_by_name("focusmode")
+                if focus_widget.get_value() != "Automatic":
+                    focus_widget.set_value("Automatic")
+                    self._camera.set_config(config, self._context)
+                    logger.info("Switched to Automatic focus mode")
+                    time.sleep(0.1)
+                    config = self._camera.get_config(self._context)
+
+                # Ensure AF toggle is released before engaging
+                af_widget = config.get_child_by_name("autofocus")
+                if af_widget.get_value() != 2:
+                    af_widget.set_value(2)
+                    self._camera.set_config(config, self._context)
+                    time.sleep(0.1)
+                    config = self._camera.get_config(self._context)
+
+                # Engage AF (half-press)
+                af_widget = config.get_child_by_name("autofocus")
+                af_widget.set_value(1)
+                self._camera.set_config(config, self._context)
+                logger.info("AF engaged (value=1)")
+
+                # Sony AF needs live-view sensor data to compute focus.
+                # We hold the lock (blocking the live view thread), so we
+                # must manually pump capture_preview() frames to give the
+                # camera sensor input for AF processing.
+                for _ in range(20):  # ~2s of preview frames
+                    try:
+                        self._camera.capture_preview()
+                    except Exception:
+                        pass
+                    time.sleep(0.1)
+
+                # Release (value=2)
+                config = self._camera.get_config(self._context)
+                af_widget = config.get_child_by_name("autofocus")
+                af_widget.set_value(2)
+                self._camera.set_config(config, self._context)
+                logger.info("AF released (value=2)")
+
+                return {"success": True, "message": "Autofocus triggered"}
+            except Exception as e:
+                logger.error(f"Autofocus failed: {e}")
+                return {"success": False, "error": str(e)}
+
     def _post_process_image(self, folder_path: Path, raw_filename: str, ext: str) -> Dict[str, str]:
         """
         Post-process a captured RAW image:

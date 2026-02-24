@@ -43,12 +43,19 @@ interface BatchResult {
   errors: string[];
 }
 
+interface ProfileInfo {
+  name: string;
+  created_at?: string;
+}
+
 export default function BatchCaptureForm() {
   const defaultFolder = `batch_${Date.now()}`;
   const [folder, setFolder] = useState(defaultFolder);
   const [prefix, setPrefix] = useState(defaultFolder);
   const [prefixTouched, setPrefixTouched] = useState(false);
   const [lightDelay, setLightDelay] = useState(0.5);
+  const [profile, setProfile] = useState('CHECKER-17FEB.npz');
+  const [profiles, setProfiles] = useState<ProfileInfo[]>([]);
   const folderInputRef = useRef<HTMLInputElement>(null);
 
   const [isRunning, setIsRunning] = useState(false);
@@ -91,6 +98,7 @@ export default function BatchCaptureForm() {
           folder,
           prefix,
           light_stabilize_delay: lightDelay,
+          profile,
         })
       );
     };
@@ -143,12 +151,25 @@ export default function BatchCaptureForm() {
     ws.onclose = () => {
       wsRef.current = null;
     };
-  }, [folder, prefix, lightDelay, topLightAfter]);
+  }, [folder, prefix, lightDelay, profile, topLightAfter]);
 
   const cancelBatchCapture = useCallback(() => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ action: 'cancel' }));
     }
+  }, []);
+
+  // Fetch available calibration profiles
+  useEffect(() => {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    fetch(`${apiUrl}/api/colorchecker/profiles`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.profiles && data.profiles.length > 0) {
+          setProfiles(data.profiles);
+        }
+      })
+      .catch(err => console.error('Failed to fetch profiles:', err));
   }, []);
 
   useEffect(() => {
@@ -311,24 +332,45 @@ export default function BatchCaptureForm() {
             />
           </div>
 
-          <div>
-            <label className="block text-sm text-slate-400 mb-1">
-              Light Stabilize Delay (s)
-            </label>
-            <input
-              type="number"
-              value={lightDelay}
-              onChange={(e) => setLightDelay(parseFloat(e.target.value))}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') {
-                  e.currentTarget.blur();
-                }
-              }}
-              min={0.5}
-              max={10}
-              step={0.5}
-              className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white text-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 focus:outline-none"
-            />
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="block text-sm text-slate-400 mb-1">
+                Light Delay (s)
+              </label>
+              <input
+                type="number"
+                value={lightDelay}
+                onChange={(e) => setLightDelay(parseFloat(e.target.value))}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    e.currentTarget.blur();
+                  }
+                }}
+                min={0.5}
+                max={10}
+                step={0.5}
+                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white text-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 focus:outline-none"
+              />
+            </div>
+            <div className="flex-1">
+              <label className="block text-sm text-slate-400 mb-1">
+                Calibration Profile
+              </label>
+              <select
+                value={profile}
+                onChange={(e) => setProfile(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white text-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 focus:outline-none"
+              >
+                {profiles.length === 0 && (
+                  <option value="CHECKER-17FEB.npz">CHECKER-17FEB</option>
+                )}
+                {profiles.map((p) => (
+                  <option key={p.name} value={p.name.endsWith('.npz') ? p.name : `${p.name}.npz`}>
+                    {p.name.replace('.npz', '')}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           <div className="bg-teal-500/10 border border-teal-500/20 rounded-lg p-3">

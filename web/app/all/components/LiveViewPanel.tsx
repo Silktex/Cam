@@ -5,9 +5,11 @@ import {
   getLiveViewUrl,
   stopLiveView,
   getCameraStatus,
+  triggerAutofocus,
   type CameraStatus,
 } from '@/lib/api';
-import { Video, VideoOff, RefreshCw } from 'lucide-react';
+import { useMutation } from '@tanstack/react-query';
+import { Video, VideoOff, RefreshCw, Focus } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 
 export default function LiveViewPanel() {
@@ -62,6 +64,10 @@ export default function LiveViewPanel() {
 
   const isStreaming = streamSrc !== null;
 
+  const autofocusMutation = useMutation({
+    mutationFn: () => triggerAutofocus(),
+  });
+
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
       <div className="flex items-center justify-between mb-3">
@@ -70,6 +76,15 @@ export default function LiveViewPanel() {
           <h2 className="text-base font-semibold text-white">Live View</h2>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => autofocusMutation.mutate()}
+            disabled={!isConnected || autofocusMutation.isPending}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-slate-700 text-slate-200 rounded-lg hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500 transition-colors"
+            title="Trigger autofocus (half-shutter)"
+          >
+            <Focus className={`w-3.5 h-3.5 ${autofocusMutation.isPending ? 'animate-pulse' : ''}`} />
+            Focus
+          </button>
           {isStreaming ? (
             <button
               onClick={stopStream}

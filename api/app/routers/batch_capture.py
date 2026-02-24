@@ -200,17 +200,19 @@ async def batch_capture_websocket(websocket: WebSocket):
                 folder = data.get("folder", f"batch_{asyncio.get_event_loop().time():.0f}")
                 prefix = data.get("prefix", "batch")
                 delay = data.get("light_stabilize_delay", 2.0)
-                
+                profile = data.get("profile", "CHECKER-17FEB.npz")
+
                 await websocket.send_json({
                     "type": "started",
-                    "data": {"folder": folder, "prefix": prefix}
+                    "data": {"folder": folder, "prefix": prefix, "profile": profile}
                 })
-                
+
                 try:
                     result = await batch_capture_service.start_batch_capture(
                         folder=folder,
                         prefix=prefix,
                         light_stabilize_delay=delay,
+                        profile=profile,
                         progress_callback=progress_callback
                     )
                     

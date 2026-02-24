@@ -125,12 +125,23 @@ class PostCaptureService:
 
             # Extract checker WB
             checker_wb_raw = None
+            if not checker_raw_path.exists():
+                # Try finding the file by base name in same directory
+                # (handles renames like "CHECKER-17FEB(1).ARW" → "CHECKER-17FEB.ARW")
+                parent = checker_raw_path.parent
+                base = checker_raw_path.stem.split("(")[0]  # strip (1), (2), etc.
+                candidates = list(parent.glob(f"{base}.*")) if parent.exists() else []
+                arw_candidates = [c for c in candidates if c.suffix.lower() in {".arw", ".cr2", ".nef", ".dng"}]
+                if arw_candidates:
+                    checker_raw_path = arw_candidates[0]
+                    logger.info(f"[{batch}] Checker RAW resolved to: {checker_raw_path}")
+
             if checker_raw_path.exists():
                 with rawpy.imread(str(checker_raw_path)) as raw:
                     checker_wb_raw = list(raw.camera_whitebalance)
                 logger.info(f"[{batch}] Checker WB: {checker_wb_raw}")
             else:
-                logger.warning(f"[{batch}] Checker RAW not found, using per-image WB")
+                logger.warning(f"[{batch}] Checker RAW not found at {checker_raw_path}, using per-image WB")
 
             # ── Compute 3x3 matrix ──
             job.current_step = "computing_matrix"
@@ -164,26 +175,42 @@ class PostCaptureService:
             job.calibrated_count = 1
             logger.info(f"[{batch}] Calibrated top in memory: {top_arw.name}")
 
-            # ── Detect boundary on calibrated top → compute crop box ──
+            # ── Detect fabric region (contour + iterative shrink, zero black) ──
             job.current_step = "detecting_boundary"
             bbox = _detect_fabric_boundary(bgr_16)
 
             h, w = bgr_16.shape[:2]
             if bbox is None:
-                cx, cy = w // 2, h // 2
+                # No boundary found — fabric fills the entire frame.
+                # Use centered square crop at crop_size (default 2048).
+                square = job.crop_size
+                logger.info(f"[{batch}] No fabric boundary (fills frame), using {square}x{square} center crop")
             else:
-                x1, y1, x2, y2 = bbox
-                cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+                fx1, fy1, fx2, fy2 = bbox
+                fabric_w = fx2 - fx1
+                fabric_h = fy2 - fy1
+                # Square side = min(default crop_size, fabric width, fabric height)
+                square = min(job.crop_size, fabric_w, fabric_h)
+                logger.info(f"[{batch}] Fabric detected: {fabric_w}x{fabric_h}, square crop: {square}x{square}")
 
-            half = job.crop_size // 2
+            # Center the square on the fabric (or image center if no detection)
+            if bbox is not None:
+                fx1, fy1, fx2, fy2 = bbox
+                cx = (fx1 + fx2) // 2
+                cy = (fy1 + fy2) // 2
+            else:
+                cx, cy = w // 2, h // 2
+
+            half = square // 2
             crop_x1 = max(0, cx - half)
             crop_y1 = max(0, cy - half)
-            crop_x2 = min(w, crop_x1 + job.crop_size)
-            crop_y2 = min(h, crop_y1 + job.crop_size)
-            if crop_x2 - crop_x1 < job.crop_size:
-                crop_x1 = max(0, crop_x2 - job.crop_size)
-            if crop_y2 - crop_y1 < job.crop_size:
-                crop_y1 = max(0, crop_y2 - job.crop_size)
+            crop_x2 = min(w, crop_x1 + square)
+            crop_y2 = min(h, crop_y1 + square)
+            # Shift if clamped at edge
+            if crop_x2 - crop_x1 < square:
+                crop_x1 = max(0, crop_x2 - square)
+            if crop_y2 - crop_y1 < square:
+                crop_y1 = max(0, crop_y2 - square)
 
             # ── Save calibration.json for on-demand rendering ──
             job.current_step = "saving_calibration"
@@ -197,7 +224,7 @@ class PostCaptureService:
                     "x2": int(crop_x2),
                     "y2": int(crop_y2),
                 },
-                "crop_size": job.crop_size,
+                "crop_size": square,
                 "raw_files": [f.name for f in fabric_arws],
                 "top_image": top_arw.name,
                 "created_at": datetime.now().isoformat(),
@@ -324,6 +351,17 @@ def _compute_3x3_matrix(detected, reference):
 
 
 def _detect_fabric_boundary(img):
+    """Find a crop rectangle that contains ONLY fabric, zero black background.
+
+    Approach:
+    1. Contour detection (edge-based) to find fabric shape — works for any
+       fabric color including dark fabrics on dark backgrounds.
+    2. Start with the contour's bounding box.
+    3. Shrink all sides by 5%. Check border strips for black background pixels.
+    4. Repeat shrinking until no black remains on edges (max 10 iterations).
+
+    Returns (x1, y1, x2, y2) or None if no valid region found.
+    """
     import cv2
     import numpy as np
 
@@ -333,13 +371,16 @@ def _detect_fabric_boundary(img):
         gray = (gray / 256).astype(np.uint8)
 
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    _, thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
+    # --- Stage 1: Find fabric contour ---
+    _, thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
     thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
     thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
 
     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    # Fallback: Canny edge detection (handles dark fabric on dark background)
     if not contours:
         edges = cv2.Canny(blurred, 50, 150)
         edges = cv2.dilate(edges, kernel, iterations=2)
@@ -354,10 +395,59 @@ def _detect_fabric_boundary(img):
         valid = contours
 
     largest = max(valid, key=cv2.contourArea)
-    x, y, bw, bh = cv2.boundingRect(largest)
-    pad = int(min(bw, bh) * 0.03)
+    bx, by, bw, bh = cv2.boundingRect(largest)
 
-    return (max(0, x - pad), max(0, y - pad), min(w, x + bw + pad), min(h, y + bh + pad))
+    # --- Stage 2: Iterative shrink until no black on edges ---
+    x1, y1, x2, y2 = bx, by, bx + bw, by + bh
+    BLACK_THRESH = 15  # pixels below this brightness = background black
+    BORDER_STRIP = 8   # pixels wide to check along each edge
+    MAX_ITERATIONS = 10
+
+    for i in range(MAX_ITERATIONS):
+        cw = x2 - x1
+        ch = y2 - y1
+        if cw < 100 or ch < 100:
+            break  # too small, stop
+
+        strip = min(BORDER_STRIP, cw // 4, ch // 4)
+        crop = gray[y1:y2, x1:x2]
+
+        # Check each edge for black background pixels
+        has_black = False
+        # Top edge
+        if np.any(crop[:strip, :] < BLACK_THRESH):
+            has_black = True
+        # Bottom edge
+        if np.any(crop[-strip:, :] < BLACK_THRESH):
+            has_black = True
+        # Left edge
+        if np.any(crop[:, :strip] < BLACK_THRESH):
+            has_black = True
+        # Right edge
+        if np.any(crop[:, -strip:] < BLACK_THRESH):
+            has_black = True
+
+        if not has_black:
+            break
+
+        # Shrink all sides by 5%
+        shrink_x = max(1, int(cw * 0.05))
+        shrink_y = max(1, int(ch * 0.05))
+        x1 += shrink_x
+        y1 += shrink_y
+        x2 -= shrink_x
+        y2 -= shrink_y
+
+    # Clamp to image bounds
+    x1 = max(0, x1)
+    y1 = max(0, y1)
+    x2 = min(w, x2)
+    y2 = min(h, y2)
+
+    if x2 - x1 < 100 or y2 - y1 < 100:
+        return None
+
+    return (x1, y1, x2, y2)
 
 
 def load_calibration(batch: str) -> dict:

@@ -25,8 +25,9 @@ export const connectCamera = () => api.post('/api/camera/connect');
 export const disconnectCamera = () => api.post('/api/camera/disconnect');
 export const troubleshootCamera = () => api.post('/api/camera/troubleshoot');
 export const getCameraSettings = () => api.get('/api/camera/settings');
-export const setCameraSetting = (name: string, value: any) => 
+export const setCameraSetting = (name: string, value: any) =>
   api.post('/api/camera/settings', { name, value });
+export const triggerAutofocus = () => api.post('/api/camera/autofocus');
 
 // Capture
 export const captureImages = (request: CaptureRequest) =>

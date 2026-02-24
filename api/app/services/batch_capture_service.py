@@ -4,6 +4,7 @@ Orchestrates light control and camera capture for multi-light photography.
 """
 import asyncio
 import logging
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Callable, Awaitable
@@ -27,6 +28,7 @@ class BatchCaptureState:
     captures: List[dict] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
     started_at: Optional[datetime] = None
+    phase: str = "capturing"  # "capturing" or "downloading"
     progress_callback: Optional[Callable[[BatchCaptureProgress], Awaitable[None]]] = None
 
 
@@ -50,6 +52,7 @@ class BatchCaptureService:
         folder: str,
         prefix: str = "batch",
         light_stabilize_delay: float = 2.0,
+        profile: str = "CHECKER-17FEB.npz",
         progress_callback: Optional[Callable[[BatchCaptureProgress], Awaitable[None]]] = None
     ) -> BatchCaptureResult:
         """
@@ -62,7 +65,7 @@ class BatchCaptureService:
         async with self._lock:
             if self._state.is_running:
                 raise Exception("Batch capture already in progress")
-            
+
             self._state = BatchCaptureState(
                 is_running=True,
                 should_cancel=False,
@@ -71,20 +74,22 @@ class BatchCaptureService:
                 captures=[],
                 errors=[],
                 started_at=datetime.now(),
+                phase="capturing",
                 progress_callback=progress_callback
             )
 
+        focus_locked = False
         try:
             logger.info(f"Starting batch capture: folder={folder}, prefix={prefix}")
-            
+
             # Ensure lights are connected
             if not light_service.connected:
                 await light_service.connect()
-            
+
             # Turn off all lights first
             await self._set_all_lights_off()
             await asyncio.sleep(0.5)
-            
+
             # Build list of all lights to capture: Top Light (id=0) + Side Lights (id=1-8)
             all_lights = [
                 {"id": self.TOP_LIGHT_ID, "name": "Top Light", "suffix": "top"},
@@ -92,16 +97,37 @@ class BatchCaptureService:
                 {"id": side_id, "name": f"Side {side_id} Light", "suffix": f"side_{side_id}"}
                 for side_id in self.SIDE_LIGHT_IDS
             ]
-            
+
+            loop = asyncio.get_event_loop()
+
+            # --- Focus once, lock for batch ---
+            # The first capture (Top Light) runs with focusmode=Automatic,
+            # so the camera autofocuses naturally during capture().
+            # After that first capture succeeds, we switch to Manual to
+            # lock focus for the remaining 8 shots.  This avoids the
+            # trigger_autofocus() toggle which corrupts Sony's PTP state.
+
             # Collect raw capture info for deferred post-processing
             raw_captures = []
 
-            # Helper: run camera prep in executor (camera ops are blocking)
-            async def _prep_camera():
-                """Drain events + ensure camera is responsive."""
-                loop = asyncio.get_event_loop()
-                await loop.run_in_executor(None, camera_service._drain_camera_events, 200)
+            # Stop live view before batch to avoid lock contention and PTP races.
+            # capture_image() also stops it, but doing it once upfront is cleaner.
+            if camera_service._live_view_active:
+                logger.info("Stopping live view before batch capture")
+                await loop.run_in_executor(None, camera_service.stop_live_view)
+                await asyncio.sleep(0.5)
 
+            # NOTE: No pre-focus step. Sony PTP rejects all AF triggers
+            # (autofocus toggle, d2c1 ShutterHalfRelease) — they corrupt
+            # the PTP session. The camera's native AF runs during capture()
+            # on the first shot (focusmode=Automatic). It may take longer
+            # if the lens is far from focus, but it's reliable.
+
+            # ======= Capture + download per image =======
+            # Sony PTP only keeps the most recent capture accessible,
+            # so we must download immediately after each capture.
+            # Focus-once still saves ~4-8s of AF time across 9 shots.
+            self._state.phase = "capturing"
             prev_light_id = None
             for step, light_info in enumerate(all_lights, start=1):
                 if self._state.should_cancel:
@@ -113,14 +139,12 @@ class BatchCaptureService:
                 light_name = light_info["name"]
                 suffix = light_info["suffix"]
 
-                # Run light switch + camera prep concurrently
-                async def _switch_lights():
-                    if prev_light_id is not None:
-                        await self._set_light(prev_light_id, on=False)
-                    await self._set_light(light_id, on=True, brightness=100)
-
-                await asyncio.gather(_switch_lights(), _prep_camera())
-                logger.info(f"{light_name} ON")
+                # Switch lights (turn off previous, turn on current)
+                t_step_start = time.time()
+                if prev_light_id is not None:
+                    await self._set_light(prev_light_id, on=False)
+                await self._set_light(light_id, on=True, brightness=100)
+                t_light = time.time()
 
                 # Report progress: waiting for light
                 await self._report_progress(
@@ -130,6 +154,7 @@ class BatchCaptureService:
 
                 # Wait for light to stabilize
                 await asyncio.sleep(light_stabilize_delay)
+                t_delay = time.time()
 
                 if self._state.should_cancel:
                     break
@@ -140,12 +165,18 @@ class BatchCaptureService:
                     message=f"Capturing with {light_name}..."
                 )
 
-                # Capture image — post-processing deferred to background
+                # Capture image — uses capture_image which handles capture+download
+                # but skip_post_process defers RAW→JPG to background
                 try:
-                    result = camera_service.capture_image(
-                        folder=folder, prefix=prefix, suffix=suffix,
-                        skip_post_process=True,
+                    result = await loop.run_in_executor(
+                        None,
+                        lambda s=suffix: camera_service.capture_image(
+                            folder=folder, prefix=prefix, suffix=s,
+                            skip_post_process=True,
+                        )
                     )
+                    t_capture = time.time()
+                    logger.info(f"[TIMING] {light_name} (step {step}/9): light={t_light-t_step_start:.2f}s delay={t_delay-t_light:.2f}s capture={t_capture-t_delay:.2f}s TOTAL={t_capture-t_step_start:.2f}s")
 
                     if result.get("success"):
                         capture_info = {
@@ -159,16 +190,27 @@ class BatchCaptureService:
                             "captured_at": result.get("captured_at")
                         }
                         self._state.captures.append(capture_info)
-                        logger.info(f"Captured: {result.get('filename')}")
+                        logger.info(f"Captured: {result.get('filename')} ({step}/9)")
 
-                        # Collect info for deferred post-processing
                         raw_captures.append({
                             "folder_path": result.get("folder_path"),
                             "raw_filename": result.get("filename"),
                             "ext": result.get("ext"),
                         })
 
-                        # Report progress
+                        # After first successful capture, lock focus to Manual.
+                        # The first capture ran in AF mode so the camera focused
+                        # naturally.  Now lock that focus distance for the rest.
+                        if step == 1 and not focus_locked:
+                            try:
+                                await loop.run_in_executor(
+                                    None, camera_service.set_setting, 'focusmode', 'Manual'
+                                )
+                                focus_locked = True
+                                logger.info("Focus locked to Manual after first capture")
+                            except Exception as e:
+                                logger.warning(f"Focus lock failed: {e}")
+
                         await self._report_progress(
                             status="processing",
                             message=f"Captured {light_name} ({step}/9)"
@@ -190,42 +232,33 @@ class BatchCaptureService:
 
                 prev_light_id = light_id
 
-            # Turn off all lights at the end
+            # Turn off all lights
             logger.info("Batch capture complete, turning off all lights")
             await self._set_all_lights_off()
 
-            # Defer RAW→JPG + calibrate+crop to background thread
+            # Queue calibration + crop in background thread
+            # (JPG conversion skipped — render_image() serves calibrated images on demand)
             if raw_captures:
                 import threading
-                def _background_post_process(captures, batch_folder):
-                    for capture in captures:
-                        try:
-                            camera_service._post_process_image(
-                                Path(capture["folder_path"]),
-                                capture["raw_filename"],
-                                capture["ext"],
-                            )
-                        except Exception as pp_err:
-                            logger.warning(f"Post-processing failed for {capture['raw_filename']}: {pp_err}")
-                    # Queue calibration + crop after JPGs are ready
+                def _background_calibrate(batch_folder, profile_name):
                     try:
                         from app.services.post_capture_service import post_capture_service
-                        post_capture_service.queue(batch_folder)
-                        logger.info(f"Queued calibrate+crop for {batch_folder}")
+                        post_capture_service.queue(batch_folder, profile=profile_name)
+                        logger.info(f"Queued calibrate+crop for {batch_folder} with profile {profile_name}")
                     except Exception as e:
                         logger.warning(f"Failed to queue post-capture processing: {e}")
 
                 threading.Thread(
-                    target=_background_post_process,
-                    args=(raw_captures, folder),
+                    target=_background_calibrate,
+                    args=(folder, profile),
                     daemon=True,
                 ).start()
-                logger.info(f"RAW→JPG + calibrate+crop dispatched to background")
+                logger.info(f"Calibrate+crop queued in background")
 
             # Build result
             completed_at = datetime.now()
             duration = (completed_at - self._state.started_at).total_seconds()
-            
+
             result = BatchCaptureResult(
                 success=len(self._state.errors) == 0,
                 folder=folder,
@@ -236,14 +269,14 @@ class BatchCaptureService:
                 duration_seconds=duration,
                 errors=self._state.errors
             )
-            
+
             await self._report_progress(
                 status="complete",
                 message=f"Batch capture complete: {len(self._state.captures)} images in {duration:.1f}s"
             )
-            
+
             return result
-            
+
         except Exception as e:
             logger.exception(f"Batch capture failed: {e}")
             # Ensure lights are off on error
@@ -252,15 +285,39 @@ class BatchCaptureService:
             except:
                 pass
             raise
-            
+
         finally:
+            # Restore AF mode if we locked focus
+            if focus_locked:
+                try:
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(None, camera_service.set_setting, 'focusmode', 'Automatic')
+                    logger.info("Restored focus mode to Automatic")
+                except Exception as e:
+                    logger.warning(f"Failed to restore AF mode: {e}")
             self._state.is_running = False
 
     async def cancel(self):
-        """Cancel an ongoing batch capture"""
+        """Cancel an ongoing batch capture.
+
+        Sets the cancel flag AND forces the camera to abort any blocking
+        capture() call by cleaning up the gphoto2 connection.  This makes
+        cancel near-instant instead of waiting 10-30s for AF timeout.
+        """
         if self._state.is_running:
             self._state.should_cancel = True
-            logger.info("Batch capture cancellation requested")
+            logger.info("Batch capture cancellation requested — aborting camera")
+
+            # Force-abort any blocking camera.capture() call by releasing
+            # the gphoto2 camera object.  The blocking call will get a
+            # gphoto2 error and return, letting the batch loop check
+            # should_cancel and exit.
+            try:
+                camera_service._cleanup_camera()
+                logger.info("Camera connection aborted for cancel")
+            except Exception as e:
+                logger.warning(f"Camera abort during cancel: {e}")
+
             return {"success": True, "message": "Cancellation requested"}
         return {"success": False, "message": "No batch capture in progress"}
 
@@ -271,7 +328,8 @@ class BatchCaptureService:
             "current_step": self._state.current_step,
             "total_steps": self._state.total_steps,
             "captures_completed": len(self._state.captures),
-            "errors": len(self._state.errors)
+            "errors": len(self._state.errors),
+            "phase": self._state.phase,
         }
 
     async def _set_light(self, light_id: int, on: bool, brightness: int = 100):
@@ -300,6 +358,7 @@ class BatchCaptureService:
                 current_light=light_name,
                 status=status,
                 message=message,
+                phase=self._state.phase,
                 captures=[c.get("filename", "") for c in self._state.captures]
             )
             try:
