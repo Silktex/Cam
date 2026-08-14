@@ -1,0 +1,5 @@
+.omo/
+*.log
+node_modules/
+__pycache__/
+.venv/
