@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "camera_system",
+  "project_id": "225c8566-9917-4996-9095-1bcfaf311fac"
+}
