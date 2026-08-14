@@ -9,3 +9,9 @@ __pycache__/
 *.db
 .beads-credential-key
 .beads/proxieddb/
+.beads/
+
+# Runtime data / generated
+camera-data/
+camera-images/
+graphify-out/
