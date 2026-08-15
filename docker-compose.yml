@@ -3,11 +3,13 @@ services:
     build:
       context: .
       args:
-        NEXT_PUBLIC_API_URL: http://localhost:8000
-        NEXT_PUBLIC_WS_URL: ws://localhost:8000
+        NEXT_PUBLIC_API_URL: ""
+        NEXT_PUBLIC_WS_URL: ""
     ports:
       - "3000:3000"
       - "8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ${MEDIA_PATH:-./camera-images}:/app/api/media
       - ${DATA_PATH:-./camera-data}:/app/api/data
@@ -17,5 +19,6 @@ services:
       - DEBUG=false
       - ESP32_HOST=192.168.0.44
       - USE_GPU=false
+      - MEDIAMTX_HOST=host.docker.internal
     privileged: true
     restart: unless-stopped

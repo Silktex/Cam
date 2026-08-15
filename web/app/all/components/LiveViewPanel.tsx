@@ -1,20 +1,26 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import {
   getLiveViewUrl,
   stopLiveView,
   getCameraStatus,
   triggerAutofocus,
+  startStream as startStreamApi,
+  stopStream as stopStreamApi,
+  getStreamHlsUrl,
   type CameraStatus,
 } from '@/lib/api';
-import { useMutation } from '@tanstack/react-query';
+import { HlsPlayer } from '@/components/hls-player';
 import { Video, VideoOff, RefreshCw, Focus } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 
+type Transport = 'hls' | 'mjpeg';
+
 export default function LiveViewPanel() {
   const [streamSrc, setStreamSrc] = useState<string | null>(null);
-  const [key, setKey] = useState(0);
+  const [streamKey, setStreamKey] = useState(0);
+  const [transport, setTransport] = useState<Transport>('hls');
 
   const { data: cameraStatus } = useQuery({
     queryKey: ['camera', 'status'],
@@ -25,13 +31,24 @@ export default function LiveViewPanel() {
   const isConnected = cameraStatus?.connected ?? false;
   const model = cameraStatus?.model || 'No camera';
 
-  const startStream = useCallback(() => {
-    setKey((k) => k + 1);
-    setStreamSrc(`${getLiveViewUrl()}?t=${Date.now()}`);
+  const startStream = useCallback(async () => {
+    try {
+      await startStreamApi();
+    } catch (e) {
+      // stream publisher may be unavailable; MJPEG fallback still works
+    }
+    setTransport('hls');
+    setStreamKey((k) => k + 1);
+    setStreamSrc(getStreamHlsUrl());
   }, []);
 
   const stopStream = async () => {
     setStreamSrc(null);
+    try {
+      await stopStreamApi();
+    } catch (e) {
+      // ignore
+    }
     try {
       await stopLiveView();
     } catch (e) {
@@ -40,8 +57,9 @@ export default function LiveViewPanel() {
   };
 
   const refreshStream = () => {
-    setKey((k) => k + 1);
-    setStreamSrc(`${getLiveViewUrl()}?t=${Date.now()}`);
+    setTransport('hls');
+    setStreamKey((k) => k + 1);
+    setStreamSrc(getStreamHlsUrl());
   };
 
   // Listen for restart event from capture panel
@@ -127,10 +145,11 @@ export default function LiveViewPanel() {
           </div>
         ) : (
           <>
-            <img
-              key={key}
-              src={streamSrc}
-              alt="Live view"
+            <HlsPlayer
+              key={streamKey}
+              src={streamSrc as string}
+              fallbackSrc={`${getLiveViewUrl()}?t=${streamKey}`}
+              onFallback={() => setTransport('mjpeg')}
               className="w-full h-full object-contain"
             />
             {/* Camera-style focus overlays */}
@@ -146,7 +165,7 @@ export default function LiveViewPanel() {
             <div className="absolute top-3 left-3 flex items-center gap-1.5 px-2 py-1 bg-slate-900/80 backdrop-blur-sm rounded-md">
               <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse" />
               <span className="text-xs text-teal-400 font-medium">
-                Live streaming...
+                {transport === 'hls' ? 'RTSP · HLS' : 'MJPEG fallback'}
               </span>
             </div>
           </>

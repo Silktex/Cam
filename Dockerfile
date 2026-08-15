@@ -12,9 +12,11 @@ RUN npm ci
 # Copy source
 COPY web/ ./
 
-# Bake public env vars into the Next.js build
-ARG NEXT_PUBLIC_API_URL=http://localhost:8000
-ARG NEXT_PUBLIC_WS_URL=ws://localhost:8000
+# Bake public env vars into the Next.js build.
+# Empty values = same-origin (proxied via next.config.js rewrites) so the UI
+# works behind any hostname (cam.silktex.com or a LAN IP) without rebaking.
+ARG NEXT_PUBLIC_API_URL=
+ARG NEXT_PUBLIC_WS_URL=
 RUN echo "NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}" > .env.local && \
     echo "NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL}" >> .env.local
 
@@ -62,6 +64,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     udev \
     ca-certificates \
     gnupg \
+    ffmpeg \
+    libva2 \
+    libva-drm2 \
+    mesa-va-drivers \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 20 (needed for next start)

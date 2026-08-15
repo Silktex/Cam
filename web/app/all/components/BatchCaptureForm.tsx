@@ -10,7 +10,7 @@ import {
   AlertCircle,
   Sun,
 } from 'lucide-react';
-import { api } from '@/lib/api';
+import { api, getWsBaseUrl, API_BASE_URL } from '@/lib/api';
 
 interface CaptureInfo {
   step: number;
@@ -87,7 +87,7 @@ export default function BatchCaptureForm() {
     setNextPrefix(nextPre);
     setNextPrefixTouched(false);
 
-    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000';
+    const wsUrl = getWsBaseUrl();
     const ws = new WebSocket(`${wsUrl}/api/batch/ws`);
     wsRef.current = ws;
 
@@ -161,8 +161,7 @@ export default function BatchCaptureForm() {
 
   // Fetch available calibration profiles
   useEffect(() => {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-    fetch(`${apiUrl}/api/colorchecker/profiles`)
+    fetch(`${API_BASE_URL}/api/colorchecker/profiles`)
       .then(res => res.json())
       .then(data => {
         if (data.profiles && data.profiles.length > 0) {

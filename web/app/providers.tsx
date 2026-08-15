@@ -2,6 +2,7 @@
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useState, createContext, useContext, useEffect, useRef, ReactNode } from 'react';
+import { getWsBaseUrl } from '@/lib/api';
 
 // WebSocket Context
 type WSStatus = 'connecting' | 'connected' | 'disconnected';
@@ -36,8 +37,7 @@ export function Providers({ children }: { children: ReactNode }) {
   const wsRef = useRef<WebSocket | null>(null);
   
   useEffect(() => {
-    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-    const WS_URL = API_URL.replace('http', 'ws') + '/api/ws/events';
+    const WS_URL = `${getWsBaseUrl()}/api/ws/events`;
     
     function connect() {
       setWsStatus('connecting');

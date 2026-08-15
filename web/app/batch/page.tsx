@@ -3,8 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import Link from 'next/link';
 import { Camera, ArrowLeft, Play, Square, Loader2, CheckCircle, AlertCircle, Lightbulb } from 'lucide-react';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+import { API_BASE_URL, getWsBaseUrl } from '@/lib/api';
 
 interface CaptureInfo {
   step: number;
@@ -62,7 +61,7 @@ export default function BatchCapturePage() {
     setResult(null);
     setError(null);
 
-    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000';
+    const wsUrl = getWsBaseUrl();
     const ws = new WebSocket(`${wsUrl}/api/batch/ws`);
     wsRef.current = ws;
 
@@ -137,7 +136,7 @@ export default function BatchCapturePage() {
 
   // Fetch available profiles on mount
   useEffect(() => {
-    fetch(`${API_URL}/api/colorchecker/profiles`)
+    fetch(`${API_BASE_URL}/api/colorchecker/profiles`)
       .then(res => res.json())
       .then(data => {
         if (data.profiles && data.profiles.length > 0) {

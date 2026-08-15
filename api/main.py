@@ -4,6 +4,7 @@ Camera Control FastAPI Backend
 Main application entry point for Sony A7R III via gphoto2
 """
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -11,15 +12,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
-from app.routers import health, camera, capture, liveview, websocket, lights, lights_ws, batch_capture, batches, processing, colorchecker
+from app.logging_setup import setup_logging
+from app.request_id_middleware import RequestIdMiddleware
+from app.routers import health, camera, capture, liveview, websocket, lights, lights_ws, batch_capture, batches, processing, colorchecker, stream
+from app.routers.stream import close_session
 from app.services.camera_service import camera_service
 from app.services.light_service import light_service
+from app.services.stream_service import stream_service
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s'
-)
+setup_logging(log_level="INFO")
 logger = logging.getLogger(__name__)
 
 
@@ -34,6 +35,13 @@ async def lifespan(app: FastAPI):
         camera_info = camera_service.startup_check()
     except Exception as e:
         logger.warning(f"Startup camera check failed: {e}")
+
+    # ── RTSP live stream publisher (defers to external publisher if present) ──
+    if os.path.exists(settings.STREAM_VIDEO_DEVICE):
+        try:
+            await stream_service.start()
+        except Exception as e:
+            logger.warning(f"Stream auto-start failed: {e}")
 
     # ── ESP32 light controller ──
     esp_info = {"host": settings.ESP32_HOST, "connected": False}
@@ -87,6 +95,12 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
 
+    # Shutdown: Close HLS proxy session
+    try:
+        await close_session()
+    except Exception:
+        pass
+
 
 app = FastAPI(
     title="Camera Control API",
@@ -94,6 +108,9 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+# Request ID middleware (must be before CORS)
+app.add_middleware(RequestIdMiddleware)
 
 # CORS - allow all origins
 app.add_middleware(
@@ -119,6 +136,7 @@ app.include_router(batch_capture.router, prefix="/api/batch", tags=["Batch Captu
 app.include_router(batches.router, prefix="/api/batches", tags=["Batches"])
 app.include_router(processing.router, prefix="/api/processing", tags=["Processing"])
 app.include_router(colorchecker.router, prefix="/api/colorchecker", tags=["ColorChecker"])
+app.include_router(stream.router, prefix="/api/stream", tags=["Stream"])
 
 
 @app.get("/")

@@ -1,6 +1,14 @@
 import axios from 'axios';
 
-export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '';
+
+export const getWsBaseUrl = () => {
+  if (typeof window !== 'undefined') {
+    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    return `${proto}://${window.location.host}`;
+  }
+  return process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000';
+};
 
 // Convert relative URL to full backend URL
 export const getFullUrl = (path: string) => {
@@ -49,6 +57,21 @@ export const resolveImageUrl = (url: string) =>
 export const getLiveViewStatus = () => api.get('/api/liveview/status');
 export const stopLiveView = () => api.post('/api/liveview/stop');
 export const getLiveViewUrl = () => `${API_BASE_URL}/api/liveview/stream`;
+
+// RTSP / HLS stream pipeline (primary live view)
+export interface StreamStatus {
+  desired: boolean;
+  publisher_alive: boolean;
+  hls_available: boolean;
+  stream_path: string;
+  rtsp_url: string;
+  hls_playlist_url: string;
+}
+
+export const getStreamStatus = () => api.get<StreamStatus>('/api/stream/status');
+export const startStream = () => api.post('/api/stream/start');
+export const stopStream = () => api.post('/api/stream/stop');
+export const getStreamHlsUrl = () => `${API_BASE_URL}/api/stream/hls/stream/index.m3u8`;
 
 // Types
 export interface HealthResponse {
