@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Dict, Optional
 
 from app.config import settings
+from app.context_utils import run_with_context
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +76,7 @@ class PostCaptureService:
             )
             self._jobs[batch] = job
 
-        self._executor.submit(self._run_job, batch)
+        self._executor.submit(run_with_context(self._run_job, batch))
         logger.info(f"Queued post-capture processing for {batch}")
         return job
 

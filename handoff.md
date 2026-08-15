@@ -1,6 +1,30 @@
 HANDOFF CONTEXT
 ===============
 
+LATEST SESSION (2026-08-14) — structured logging system
+--------------------------------------------------------
+Goal: add a logging system so the camera_system is easier to debug. Completed end-to-end; work is UNCOMMITTED on top of baseline commit `9e12e39`.
+
+WHAT LANDED:
+- Backend (api/): structlog + contextvars structured logging. `app/logging_setup.py` (JSON stdout, merge_contextvars first, stdlib bridge via ProcessorFormatter), `app/request_id_middleware.py` (pure-ASGI, binds request_id/method/route, echoes x-request-id), `app/context_utils.py` (`run_with_context()` for threadpool context propagation). Wired in `main.py` with `log_config=None` and `LOG_LEVEL` (new setting in `config.py`).
+- Correlation: 3 WebSocket routers (`websocket.py`, `lights_ws.py`, `batch_capture.py`) bind a per-connection `session_id`; `batch_capture_service.py` + `post_capture_service.py` + `batch_capture.py` wrap all `run_in_executor`/`executor.submit` calls in `run_with_context`.
+- Frontend (web/): `lib/logger.ts` (JSON + AsyncLocalStorage requestId), `middleware.ts` (mint/forward x-request-id), `lib/api.ts` + `lib/lightsApi.ts` read x-request-id on error, `app/api/health/route.ts` server log call site.
+- Ops: `docker-compose.yml` json-file log rotation (max-size=10m, max-file=5, compress), `LOG_LEVEL=INFO`.
+- Tests: `api/tests/test_logging_core.py` (3), `api/tests/test_correlation.py` (10), `web/__tests__/lib/logger.test.ts` (2). Backend 110 passed / 21 skipped; web 147 passed / 2 pre-existing failures (Equalize PE-10, Validate PV-02).
+
+VERIFICATION: run `.venv/bin/python -m pytest tests/` in api/ (ignore 6 gphoto2/scipy collection-error files: test_camera_concurrency, test_clone_service, test_event_bus_threading, test_perspective_service, test_seamless_service, test_straighten_service, test_validate_service). Web: `npx vitest run`.
+
+NOTES / FOLLOW-UPS:
+- Frontend logger is hand-rolled (not pino) — no new npm dep; equivalent JSON+ALS behavior.
+- A subagent wrote piece 085.3 into /home/posh/Desktop/camera_system (stale GitHub clone) by mistake; changes were ported to the real project by hand and re-verified. Ignore the Desktop clone.
+- Beads epic camera_system-085 + children 085.1–085.6 all closed.
+- Still UNCOMMITTED. Do not push unless explicitly asked.
+- Model-routing note: `~/.omo/omo.jsonc` categories load once at opencode server start; edits need full process restart. `gpt-5.6-sol` was rate-limited (~5.4 days) this session; work used qwen3.7-plus (builder) + glm-5.2 (critic).
+
+PENDING (from prior session, still open):
+- Physical-camera validation of cancellation during an actively blocked capture.
+- Optional: warn/freeze handling for exposure-mode (not just parameter) changes (3-8s stall on A7R III).
+
 USER REQUESTS (AS-IS)
 ---------------------
 - ~/projects/camera_system/sony/Examples/example-v2-linux contains sony exmple for building camera controls. Compare with existing gphoto2. I want non blocking commands. For exmple if I change shutter speed, live view disconnects takes few seconds to connect. Research online for best method for non blocking commands for sony a7r3

@@ -9,21 +9,24 @@ global.ResizeObserver = class ResizeObserver {
 } as any;
 
 // ── Mock window.matchMedia ──
-Object.defineProperty(window, 'matchMedia', {
-  writable: true,
-  value: (query: string) => ({
-    matches: false,
-    media: query,
-    onchange: null,
-    addListener: () => {},
-    removeListener: () => {},
-    addEventListener: () => {},
-    removeEventListener: () => {},
-    dispatchEvent: () => false,
-  }),
-});
+if (typeof window !== 'undefined') {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: (query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }),
+  });
+}
 
 // ── Mock HTMLCanvasElement.getContext ──
+if (typeof HTMLCanvasElement !== 'undefined') {
 HTMLCanvasElement.prototype.getContext = ((originalGetContext) => {
   return function (this: HTMLCanvasElement, type: string, ...args: any[]) {
     if (type === '2d') {
@@ -80,8 +83,10 @@ HTMLCanvasElement.prototype.getContext = ((originalGetContext) => {
     return null;
   };
 })(HTMLCanvasElement.prototype.getContext);
+}
 
 // ── Mock Image loading ──
+if (typeof global !== 'undefined') {
 Object.defineProperty(global, 'Image', {
   writable: true,
   value: class MockImage {
@@ -100,6 +105,7 @@ Object.defineProperty(global, 'Image', {
     }
   },
 });
+}
 
 // ── Mock next/navigation ──
 vi.mock('next/navigation', () => ({

@@ -4,7 +4,9 @@ Provides real-time state updates for lights.
 """
 import asyncio
 import logging
+import uuid
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from structlog.contextvars import bind_contextvars, clear_contextvars
 
 from app.services.light_service import light_service
 
@@ -29,6 +31,8 @@ async def lights_websocket(websocket: WebSocket):
     - type: "set_all" - Set all lights: {"on": true, "brightness": 100}
     """
     await websocket.accept()
+    session_id = uuid.uuid4().hex[:8]
+    bind_contextvars(session_id=session_id, ws_type="lights")
     await light_service.register_websocket(websocket)
     
     try:
@@ -92,3 +96,4 @@ async def lights_websocket(websocket: WebSocket):
         logger.error(f"WebSocket error: {e}")
     finally:
         await light_service.unregister_websocket(websocket)
+        clear_contextvars()

@@ -16,11 +16,11 @@ from app.services.camera_service import camera_service
 from app.services.event_bus import event_bus
 from app.services.light_service import light_service
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s'
-)
+# Configure structured logging — MUST be before app creation
+from app.logging_setup import setup_logging
+from app.request_id_middleware import RequestIdMiddleware
+
+setup_logging(level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO))
 logger = logging.getLogger(__name__)
 
 
@@ -102,6 +102,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Request ID middleware — binds request_id to contextvars for structured logs
+app.add_middleware(RequestIdMiddleware)
+
 # CORS - allow all origins
 app.add_middleware(
     CORSMiddleware,
@@ -137,9 +140,11 @@ async def root():
 
 if __name__ == "__main__":
     import uvicorn
+    # NOTE: if running via entrypoint.sh, ensure it doesn't override log config
     uvicorn.run(
         "main:app",
         host=settings.HOST,
         port=settings.PORT,
         reload=settings.DEBUG,
+        log_config=None,
     )

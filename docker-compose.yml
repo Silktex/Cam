@@ -15,7 +15,15 @@ services:
       - /dev/bus/usb:/dev/bus/usb
     environment:
       - DEBUG=false
+      - LOG_LEVEL=INFO
       - ESP32_HOST=10.10.2.20
       - USE_GPU=false
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+        compress: "true"
+        tag: "{{.Name}}"
     privileged: true
     restart: unless-stopped

@@ -2,6 +2,10 @@ import axios from 'axios';
 
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
+interface RequestIdError extends Error {
+  requestId?: string;
+}
+
 // Convert relative URL to full backend URL
 export const getFullUrl = (path: string) => {
   if (!path) return '';
@@ -15,6 +19,19 @@ export const api = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+api.interceptors.response.use(
+  (response) => response,
+  (error: unknown) => {
+    if (axios.isAxiosError(error) && error.response?.headers) {
+      const requestId = error.response.headers['x-request-id'];
+      if (typeof requestId === 'string') {
+        (error as RequestIdError).requestId = requestId;
+      }
+    }
+    return Promise.reject(error);
+  }
+);
 
 // Health
 export const getHealth = () => api.get('/health');

@@ -3,12 +3,15 @@ Batch Capture API Router
 """
 import asyncio
 import logging
+import uuid
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
 from typing import Optional
+from structlog.contextvars import bind_contextvars, clear_contextvars
 
 from app.models.batch_capture import BatchCaptureRequest, BatchCaptureResult, BatchCaptureProgress
 from app.services.batch_capture_service import batch_capture_service
+from app.context_utils import run_with_context
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +133,7 @@ async def render_batch_image(
         try:
             loop = asyncio.get_event_loop()
             data = await loop.run_in_executor(
-                None, render_image, folder, filename, fmt, crop
+                None, run_with_context(render_image, folder, filename, fmt, crop)
             )
         except FileNotFoundError as e:
             raise HTTPException(status_code=404, detail=str(e))
@@ -172,6 +175,8 @@ async def batch_capture_websocket(websocket: WebSocket):
     {"type": "error", "data": {"message": "..."}}
     """
     await websocket.accept()
+    session_id = uuid.uuid4().hex[:8]
+    bind_contextvars(session_id=session_id, ws_type="batch")
     logger.info("Batch capture WebSocket connected")
     
     async def progress_callback(progress: BatchCaptureProgress):
@@ -250,3 +255,5 @@ async def batch_capture_websocket(websocket: WebSocket):
         logger.info("Batch capture WebSocket disconnected")
     except Exception as e:
         logger.error(f"Batch capture WebSocket error: {e}")
+    finally:
+        clear_contextvars()

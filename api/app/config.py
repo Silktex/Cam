@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     HOST: str = "0.0.0.0"
     PORT: int = 8000
     DEBUG: bool = True
+    LOG_LEVEL: str = "INFO"
     
     # CORS — allow all origins
     CORS_ORIGINS: List[str] = ["*"]
