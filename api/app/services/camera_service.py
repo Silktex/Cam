@@ -95,9 +95,23 @@ class CameraService:
         return killed
 
     def reset_usb(self) -> bool:
-        """Reset USB device — tries gphoto2 --reset first, then
-        falls back to ioctl USBDEVFS_RESET on Linux."""
-        # 1. Try gphoto2 --reset (works on both platforms)
+        """Reset USB device via raw ioctl on Linux, gphoto2 --reset elsewhere.
+
+        On Linux the USBDEVFS_RESET ioctl is used preferentially: it resets
+        the port WITHOUT opening a PTP session. gphoto2 --reset loads the
+        Sony PTP driver and claims the interface first — a port reset
+        mid-handshake can wedge the camera's PTP responder (observed on
+        A7R III running on mains power with no battery installed).
+        """
+        if platform.system() == "Linux":
+            if self._usb_reset_ioctl():
+                return True
+            logger.warning(
+                "ioctl USB reset failed; not falling back to gphoto2 --reset "
+                "on Linux (PTP-session reset can wedge Sony bodies)"
+            )
+            return False
+
         try:
             result = subprocess.run(
                 ["gphoto2", "--reset"],
@@ -111,10 +125,6 @@ class CameraService:
                 return True
         except Exception as e:
             logger.warning(f"gphoto2 reset failed: {e}")
-
-        # 2. Linux fallback: ioctl USB reset on the device node
-        if platform.system() == "Linux":
-            return self._usb_reset_ioctl()
 
         return False
 
@@ -301,10 +311,15 @@ class CameraService:
         if self._camera:
             try:
                 self._camera.exit(self._context)
-            except Exception:
-                pass
-        self._camera = None
-        self._context = None
+            except Exception as e:
+                logger.warning(f"Camera exit() failed (PTP session may remain open on camera): {e}")
+            self._camera = None
+            self._context = None
+            # Let the kernel release the USB interface claim before any
+            # subsequent operation touches the port.
+            time.sleep(0.5)
+        else:
+            self._context = None
         self._connected = False
         self._model = None
     
@@ -345,31 +360,34 @@ class CameraService:
         }
     
     def troubleshoot(self) -> Dict[str, Any]:
-        """Kill USB-grabbing processes, reset USB, and detect camera.
+        """Kill USB-grabbing processes and recover the camera connection.
 
-        Platform-aware: kills macOS PTP daemons or Linux gvfs processes,
-        and uses ioctl USB reset as fallback on Linux.
+        USB port reset is a last resort: attempted only when the camera is
+        NOT detected after process cleanup. Resetting the port on a healthy
+        Sony body (especially mains-powered with no battery) can wedge its
+        PTP responder until a full power cycle.
         """
         os_name = platform.system()  # "Darwin" or "Linux"
         with self._lock:
             self._stop_live_view.set()
             self._cleanup_camera()
 
-            # Kill processes
             killed = self.kill_ptp_processes()
-            time.sleep(0.3)
-
-            # Reset USB device
-            usb_reset = self.reset_usb()
-            time.sleep(0.5)
-
-            # Kill again after reset (daemons may respawn)
-            killed2 = self.kill_ptp_processes()
-            killed.extend(killed2)
             time.sleep(0.3)
 
             camera_info = self.detect_camera_info()
             detected = camera_info.get("detected", False)
+
+            usb_reset = False
+            reset_skipped = detected
+            if not detected:
+                usb_reset = self.reset_usb()
+                time.sleep(0.5)
+                killed2 = self.kill_ptp_processes()
+                killed.extend(killed2)
+                time.sleep(0.3)
+                camera_info = self.detect_camera_info()
+                detected = camera_info.get("detected", False)
 
             parts = []
             parts.append(f"Platform: {os_name}.")
@@ -377,7 +395,12 @@ class CameraService:
                 parts.append(f"Killed {len(killed)} processes: {', '.join(killed)}.")
             else:
                 parts.append("No USB-grabbing processes found to kill.")
-            parts.append(f"USB reset: {'success' if usb_reset else 'failed'}.")
+            if usb_reset:
+                parts.append("USB reset: success.")
+            elif reset_skipped:
+                parts.append("USB reset skipped — camera detected; port reset on a healthy Sony can wedge its PTP stack.")
+            else:
+                parts.append("USB reset: failed.")
             if detected:
                 parts.append(f"Camera detected: {camera_info.get('model', 'unknown')} on {camera_info.get('port', 'unknown')}.")
             else:

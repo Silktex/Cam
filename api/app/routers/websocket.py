@@ -2,7 +2,10 @@
 WebSocket Router - Real-time events
 """
 import json
+import uuid
+
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from structlog.contextvars import bind_contextvars, clear_contextvars
 
 from app.services.event_bus import event_bus
 
@@ -23,6 +26,8 @@ async def websocket_endpoint(websocket: WebSocket):
     - error: Error occurred
     """
     await websocket.accept()
+    session_id = uuid.uuid4().hex[:8]
+    bind_contextvars(session_id=session_id, ws_type="events")
     event_bus.register_ws(websocket)
     
     try:
@@ -54,3 +59,4 @@ async def websocket_endpoint(websocket: WebSocket):
         pass
     finally:
         event_bus.unregister_ws(websocket)
+        clear_contextvars()

@@ -14,6 +14,7 @@ from app.config import settings
 from app.services.light_service import light_service
 from app.services.camera_service import camera_service
 from app.models.batch_capture import BatchCaptureProgress, BatchCaptureResult
+from app.context_utils import run_with_context
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +115,7 @@ class BatchCaptureService:
             # capture_image() also stops it, but doing it once upfront is cleaner.
             if camera_service._live_view_active:
                 logger.info("Stopping live view before batch capture")
-                await loop.run_in_executor(None, camera_service.stop_live_view)
+                await loop.run_in_executor(None, run_with_context(camera_service.stop_live_view))
                 await asyncio.sleep(0.5)
 
             # NOTE: No pre-focus step. Sony PTP rejects all AF triggers
@@ -170,8 +171,9 @@ class BatchCaptureService:
                 try:
                     result = await loop.run_in_executor(
                         None,
-                        lambda s=suffix: camera_service.capture_image(
-                            folder=folder, prefix=prefix, suffix=s,
+                        run_with_context(
+                            camera_service.capture_image,
+                            folder=folder, prefix=prefix, suffix=suffix,
                             skip_post_process=True,
                         )
                     )
@@ -204,7 +206,7 @@ class BatchCaptureService:
                         if step == 1 and not focus_locked:
                             try:
                                 await loop.run_in_executor(
-                                    None, camera_service.set_setting, 'focusmode', 'Manual'
+                                    None, run_with_context(camera_service.set_setting, 'focusmode', 'Manual')
                                 )
                                 focus_locked = True
                                 logger.info("Focus locked to Manual after first capture")
@@ -291,7 +293,7 @@ class BatchCaptureService:
             if focus_locked:
                 try:
                     loop = asyncio.get_event_loop()
-                    await loop.run_in_executor(None, camera_service.set_setting, 'focusmode', 'Automatic')
+                    await loop.run_in_executor(None, run_with_context(camera_service.set_setting, 'focusmode', 'Automatic'))
                     logger.info("Restored focus mode to Automatic")
                 except Exception as e:
                     logger.warning(f"Failed to restore AF mode: {e}")
