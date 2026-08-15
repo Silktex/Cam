@@ -12,24 +12,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-_session: aiohttp.ClientSession | None = None
-
-
-def _get_session() -> aiohttp.ClientSession:
-    global _session
-    if _session is None or _session.closed:
-        _session = aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=60, connect=5)
-        )
-    return _session
-
-
-async def close_session():
-    global _session
-    if _session is not None and not _session.closed:
-        await _session.close()
-        _session = None
-
 
 @router.get("/status")
 async def status():
@@ -52,15 +34,18 @@ async def hls_proxy(path: str, request: Request):
     url = f"http://{settings.MEDIAMTX_HOST}:{settings.MEDIAMTX_HLS_PORT}/{path}"
     if query:
         url += f"?{query}"
-    session = _get_session()
+    timeout = aiohttp.ClientTimeout(total=60, connect=5)
+    session = aiohttp.ClientSession(timeout=timeout)
 
     try:
         upstream = await session.get(url)
     except aiohttp.ClientError:
+        await session.close()
         raise HTTPException(status_code=503, detail="Stream server unavailable")
 
     if upstream.status != 200:
         await upstream.release()
+        await session.close()
         raise HTTPException(status_code=upstream.status, detail="Stream path not available")
 
     headers = {
@@ -74,5 +59,6 @@ async def hls_proxy(path: str, request: Request):
                 yield chunk
         finally:
             upstream.release()
+            await session.close()
 
     return StreamingResponse(body(), status_code=200, headers=headers)

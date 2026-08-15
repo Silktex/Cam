@@ -4,7 +4,6 @@ Camera Control FastAPI Backend
 Main application entry point for Sony A7R III via gphoto2
 """
 import logging
-import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -15,10 +14,8 @@ from app.config import settings
 from app.logging_setup import setup_logging
 from app.request_id_middleware import RequestIdMiddleware
 from app.routers import health, camera, capture, liveview, websocket, lights, lights_ws, batch_capture, batches, processing, colorchecker, stream
-from app.routers.stream import close_session
 from app.services.camera_service import camera_service
 from app.services.light_service import light_service
-from app.services.stream_service import stream_service
 
 setup_logging(log_level="INFO")
 logger = logging.getLogger(__name__)
@@ -35,13 +32,6 @@ async def lifespan(app: FastAPI):
         camera_info = camera_service.startup_check()
     except Exception as e:
         logger.warning(f"Startup camera check failed: {e}")
-
-    # ── RTSP live stream publisher (defers to external publisher if present) ──
-    if os.path.exists(settings.STREAM_VIDEO_DEVICE):
-        try:
-            await stream_service.start()
-        except Exception as e:
-            logger.warning(f"Stream auto-start failed: {e}")
 
     # ── ESP32 light controller ──
     esp_info = {"host": settings.ESP32_HOST, "connected": False}
@@ -92,12 +82,6 @@ async def lifespan(app: FastAPI):
     # Shutdown: Disconnect light controller
     try:
         await light_service.disconnect()
-    except Exception:
-        pass
-
-    # Shutdown: Close HLS proxy session
-    try:
-        await close_session()
     except Exception:
         pass
 

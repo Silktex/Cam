@@ -24,3 +24,11 @@ node_modules/
 api/media/
 !api/media/colorchecker/profiles/
 api/data/
+
+# TLS / certs
+*.crt
+*.key
+*.pem
+
+# Captured images (local only)
+camera-images/
