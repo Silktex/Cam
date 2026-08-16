@@ -38,6 +38,10 @@ All test suites and production builds are **100% passing**:
 1. **NetBird SSO Expiration on Host `ind`**: The `ingress-netbird` container experienced an expired SSO session with the management server. A non-expiring Setup Key generated in NetBird (`https://nb.rs74.net`) must be configured as `NB_SETUP_KEY` in the container stack.
 2. **Cloudflare 302 Loop**: When Cloudflare SSL is set to Flexible, port 80 traffic enters an infinite 302 redirect loop with `silktex-proxy`. Cloudflare SSL mode should be set to **Full (Strict)** or configured with an Origin Rule routing `cam.silktex.com` directly to port `3100`.
 
+### F. Git Repository & Remote Rules
+- **Active Canonical Repository**: `https://github.com/Silktex/Cam.git` (`silktex/cam`). All future commits and pushes MUST go to `silktex/cam`.
+- **Forbidden Target**: NEVER commit or push to `Silktex/camera_system`. `Silktex/camera_system` has been reverted to commit `a330ce0` (pre-Aug 16) and all recent commits have been removed.
+
 ---
 
 ## 3. 5-Station Studio Workbench & Classic /v1 Cockpit Routing
