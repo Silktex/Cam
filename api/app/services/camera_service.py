@@ -324,9 +324,23 @@ class CameraService:
         return killed
 
     def reset_usb(self) -> bool:
-        """Reset USB device — tries gphoto2 --reset first, then
-        falls back to ioctl USBDEVFS_RESET on Linux."""
-        # 1. Try gphoto2 --reset (works on both platforms)
+        """Reset USB device via raw ioctl on Linux, gphoto2 --reset elsewhere.
+
+        On Linux the USBDEVFS_RESET ioctl is used preferentially: it resets
+        the port WITHOUT opening a PTP session. gphoto2 --reset loads the
+        Sony PTP driver and claims the interface first — a port reset
+        mid-handshake can wedge the camera's PTP responder (observed on
+        A7R III running on mains power with no battery installed).
+        """
+        if platform.system() == "Linux":
+            if self._usb_reset_ioctl():
+                return True
+            logger.warning(
+                "ioctl USB reset failed; not falling back to gphoto2 --reset "
+                "on Linux (PTP-session reset can wedge Sony bodies)"
+            )
+            return False
+
         try:
             result = subprocess.run(
                 ["gphoto2", "--reset"],
@@ -340,10 +354,6 @@ class CameraService:
                 return True
         except Exception as e:
             logger.warning(f"gphoto2 reset failed: {e}")
-
-        # 2. Linux fallback: ioctl USB reset on the device node
-        if platform.system() == "Linux":
-            return self._usb_reset_ioctl()
 
         return False
 
@@ -612,8 +622,10 @@ class CameraService:
     def troubleshoot(self) -> Dict[str, Any]:
         """Kill USB-grabbing processes, reset USB, and reconnect the camera.
 
-        Platform-aware: kills macOS PTP daemons or Linux gvfs processes,
-        and uses ioctl USB reset as fallback on Linux.
+        USB port reset is a last resort: attempted only when the camera is
+        NOT detected after process cleanup. Resetting the port on a healthy
+        Sony body (especially mains-powered with no battery) can wedge its
+        PTP responder until a full power cycle.
         """
         os_name = platform.system()  # "Darwin" or "Linux"
 

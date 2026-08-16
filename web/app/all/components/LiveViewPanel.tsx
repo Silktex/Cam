@@ -7,12 +7,17 @@ import {
   stopLiveView,
   getCameraStatus,
   triggerAutofocus,
+  startStream as startStreamApi,
+  stopStream as stopStreamApi,
+  getStreamHlsUrl,
   type CameraStatus,
   type LiveViewStatus,
 } from '@/lib/api';
 import { Video, VideoOff, RefreshCw, Focus, Layers } from 'lucide-react';
 import { useState, useCallback } from 'react';
 import { WebRTCStreamViewer } from '@/components/WebRTCStreamViewer';
+
+type Transport = 'hls' | 'mjpeg';
 
 export default function LiveViewPanel() {
   const [streamSource, setStreamSource] = useState<'hdmi' | 'ptp'>('hdmi');

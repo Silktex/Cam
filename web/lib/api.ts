@@ -87,6 +87,21 @@ export const stopLiveView = () => api.post('/api/liveview/stop');
 export const getLiveViewUrl = () => `${getApiBaseUrl()}/api/liveview/stream`;
 export const getWhepStreamUrl = () => `${getApiBaseUrl()}/stream/whep`;
 
+// RTSP / HLS stream pipeline (primary live view)
+export interface StreamStatus {
+  desired: boolean;
+  publisher_alive: boolean;
+  hls_available: boolean;
+  stream_path: string;
+  rtsp_url: string;
+  hls_playlist_url: string;
+}
+
+export const getStreamStatus = () => api.get<StreamStatus>('/api/stream/status');
+export const startStream = () => api.post('/api/stream/start');
+export const stopStream = () => api.post('/api/stream/stop');
+export const getStreamHlsUrl = () => `${API_BASE_URL}/api/stream/hls/stream/index.m3u8`;
+
 // Types
 export interface HealthResponse {
   status: string;

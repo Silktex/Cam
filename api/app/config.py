@@ -34,6 +34,17 @@ class Settings(BaseSettings):
     # Camera settings
     CAMERA_TIMEOUT: int = 10  # seconds
     PREVIEW_FPS: int = 15
+
+    # RTSP live stream pipeline (mediamtx + ffmpeg VA-API publisher)
+    MEDIAMTX_HOST: str = "127.0.0.1"  # set to host.docker.internal in compose
+    MEDIAMTX_RTSP_PORT: int = 8554
+    MEDIAMTX_HLS_PORT: int = 8888
+    STREAM_PATH: str = "stream"  # mediamtx path name
+    STREAM_RESOLUTION: str = "1920x1080"
+    STREAM_FPS: int = 20
+    STREAM_BITRATE_KBPS: int = 4000
+    STREAM_VAAPI_DEVICE: str = "/dev/dri/renderD128"
+    STREAM_VIDEO_DEVICE: str = "/dev/video0"
     
     # ESP32 Light Controller (HTTP API)
     ESP32_HOST: str = "192.168.0.44"

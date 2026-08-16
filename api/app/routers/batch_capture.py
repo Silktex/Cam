@@ -14,7 +14,6 @@ from app.services.batch_capture_service import batch_capture_service
 from app.context_utils import run_with_context
 
 logger = logging.getLogger(__name__)
-
 router = APIRouter()
 
 # Limit concurrent on-demand renders (each uses ~500-800MB RAM)
