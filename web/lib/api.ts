@@ -1,6 +1,7 @@
 import axios from 'axios';
+import { getApiBaseUrl } from './urlHelpers';
 
-export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+export const API_BASE_URL = getApiBaseUrl();
 
 interface RequestIdError extends Error {
   requestId?: string;
@@ -10,14 +11,23 @@ interface RequestIdError extends Error {
 export const getFullUrl = (path: string) => {
   if (!path) return '';
   if (path.startsWith('data:') || path.startsWith('http')) return path;
-  return `${API_BASE_URL}${path}`;
+  const base = getApiBaseUrl();
+  return base ? `${base}${path.startsWith('/') ? '' : '/'}${path}` : path;
 };
 
 export const api = axios.create({
-  baseURL: API_BASE_URL,
+  baseURL: getApiBaseUrl(),
   headers: {
     'Content-Type': 'application/json',
   },
+});
+
+api.interceptors.request.use((config) => {
+  const dynamicBase = getApiBaseUrl();
+  if (dynamicBase && !config.url?.startsWith('http://') && !config.url?.startsWith('https://')) {
+    config.baseURL = dynamicBase;
+  }
+  return config;
 });
 
 api.interceptors.response.use(
@@ -58,14 +68,24 @@ export const deleteFile = (filePath: string) =>
   api.delete(`/api/capture/files/${filePath}`);
 export const browsePath = (path: string = "") =>
   api.get(`/api/capture/browse/${path}`);
-export const getMediaUrl = (path: string) => `${API_BASE_URL}/media/captures/${path}`;
-export const resolveImageUrl = (url: string) =>
-  url.startsWith('/api/') ? `${API_BASE_URL}${url}` : `${API_BASE_URL}${url}`;
 
-// Live View
+// Helper to resolve media URLs
+export const getMediaUrl = (url: string | null | undefined): string => {
+  if (!url) return '';
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) return url;
+  const base = getApiBaseUrl();
+  return `${base}${url.startsWith('/') ? '' : '/'}${url}`;
+};
+
+// Live View & Video Capture Card
 export const getLiveViewStatus = () => api.get('/api/liveview/status');
+export const setLiveViewSource = (source: 'hdmi' | 'ptp') =>
+  api.post('/api/liveview/source', { source });
+export const getLiveViewCapabilities = () => api.get('/api/liveview/capabilities');
+export const getVideoDevices = () => api.get('/api/devices/video');
 export const stopLiveView = () => api.post('/api/liveview/stop');
-export const getLiveViewUrl = () => `${API_BASE_URL}/api/liveview/stream`;
+export const getLiveViewUrl = () => `${getApiBaseUrl()}/api/liveview/stream`;
+export const getWhepStreamUrl = () => `${getApiBaseUrl()}/stream/whep`;
 
 // Types
 export interface HealthResponse {
@@ -80,6 +100,57 @@ export interface HealthResponse {
     connected: boolean;
     detected: boolean;
     model?: string;
+  };
+}
+
+export interface LiveViewStatus {
+  available: boolean;
+  active: boolean;
+  model: string;
+  active_source: 'hdmi' | 'ptp';
+  available_sources: ('hdmi' | 'ptp')[];
+  device_name: string;
+  stream_type: 'webrtc_h264' | 'ptp_direct';
+  whep_url: string;
+  rtsp_url: string;
+  hls_url: string;
+  resolution: string;
+  fps: number;
+  hw_accel?: {
+    enabled: boolean;
+    encoder: string;
+    device: string;
+    profile: string;
+    latency: string;
+  };
+}
+
+export interface VideoDevice {
+  device_node: string;
+  sysfs_path: string;
+  raw_name: string;
+  name: string;
+  is_capture_card: boolean;
+  formats: {
+    pixel_format: string;
+    description: string;
+    resolutions: {
+      width: number;
+      height: number;
+      fps: number[];
+      default?: boolean;
+    }[];
+  }[];
+  hw_accel: {
+    enabled: boolean;
+    encoder: string;
+    device: string;
+    profile: string;
+  };
+  stream_endpoints: {
+    rtsp: string;
+    whep: string;
+    hls: string;
   };
 }
 

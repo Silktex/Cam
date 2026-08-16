@@ -13,8 +13,8 @@ RUN npm ci
 COPY web/ ./
 
 # Bake public env vars into the Next.js build
-ARG NEXT_PUBLIC_API_URL=http://localhost:8000
-ARG NEXT_PUBLIC_WS_URL=ws://localhost:8000
+ARG NEXT_PUBLIC_API_URL=""
+ARG NEXT_PUBLIC_WS_URL=""
 RUN echo "NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}" > .env.local && \
     echo "NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL}" >> .env.local
 
@@ -62,6 +62,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     udev \
     ca-certificates \
     gnupg \
+    psmisc \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 20 (needed for next start)

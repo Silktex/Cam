@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Station 5: High-Res Asset Inspection Lightbox | Sony A7R III</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            chassis: '#121417',
+            surface: '#1A1D23',
+            'surface-raised': '#262B34',
+            'border-subtle': 'rgba(255, 255, 255, 0.08)',
+            'border-strong': 'rgba(255, 255, 255, 0.16)',
+            accent: '#E58E26',
+            'accent-muted': 'rgba(229, 142, 38, 0.15)',
+            'status-ok': '#10B981',
+            'status-warn': '#F59E0B',
+            'status-err': '#EF4444',
+          },
+          fontFamily: {
+            mono: ['JetBrains Mono', 'monospace'],
+            sans: ['Plus Jakarta Sans', 'sans-serif'],
+            display: ['Space Grotesk', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-chassis text-gray-100 font-sans min-h-screen flex flex-col antialiased selection:bg-accent selection:text-white">
+  
+  <!-- Global Toast Notification Container -->
+  <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+  <!-- Global Top Header -->
+  <header class="h-14 border-b border-border-subtle bg-surface/90 backdrop-blur px-5 flex items-center justify-between shrink-0 sticky top-0 z-40">
+    <div class="flex items-center gap-4">
+      <div class="flex items-center gap-2.5">
+        <div class="w-3 h-3 rounded-full bg-accent animate-pulse"></div>
+        <span class="font-display font-bold text-lg tracking-tight text-white">OPTIX<span class="text-accent">.RIG</span></span>
+        <span class="text-xs font-mono px-2 py-0.5 rounded bg-surface-raised border border-border-subtle text-gray-400">INSPECTION LIGHTBOX</span>
+      </div>
+      <div class="h-4 w-px bg-border-subtle"></div>
+      
+      <!-- Live Navigation Station Links -->
+      <nav class="flex items-center gap-1">
+        <a href="unified-capture-studio.html" class="px-3 py-1 rounded hover:bg-surface-raised text-gray-400 hover:text-gray-200 text-xs transition">
+          1. Capture Studio
+        </a>
+        <a href="photometric-batch-sequencer.html" class="px-3 py-1 rounded hover:bg-surface-raised text-gray-400 hover:text-gray-200 text-xs transition">
+          2. Batch Sequencer
+        </a>
+        <a href="color-calibration-studio.html" class="px-3 py-1 rounded hover:bg-surface-raised text-gray-400 hover:text-gray-200 text-xs transition">
+          3. Color Calibration
+        </a>
+        <a href="pbr-texture-lab.html" class="px-3 py-1 rounded hover:bg-surface-raised text-gray-400 hover:text-gray-200 text-xs transition">
+          4. PBR Synthesis
+        </a>
+        <a href="asset-inspection-gallery.html" class="px-3 py-1 rounded bg-accent/15 text-accent font-medium text-xs border border-accent/30 flex items-center gap-1.5 shadow-sm">
+          <span class="w-1.5 h-1.5 rounded-full bg-accent"></span>
+          5. Lightbox Gallery
+        </a>
+      </nav>
+    </div>
+
+    <!-- Search with Meilisearch Indicator -->
+    <div class="flex items-center gap-3">
+      <div class="relative w-64">
+        <input id="input-search" oninput="filterAssets(this.value)" type="text" placeholder="Search SKU, fabric, batch..." value="Daylily 4355" class="w-full bg-surface-raised border border-border-strong rounded-lg pl-8 pr-3 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-accent">
+        <svg class="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+      </div>
+      <button onclick="showToast('Filter presets: All / RAW / PBR / Calibrated')" class="px-3 py-1 rounded bg-surface-raised hover:bg-white/10 text-xs font-mono text-gray-300 border border-border-subtle transition active:scale-95">
+        Filter View
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Deep-Zoom Lightbox View -->
+  <main class="flex-1 p-6 max-w-7xl mx-auto w-full grid grid-cols-12 gap-6 overflow-y-auto">
+    
+    <!-- LEFT: 61MP Deep-Zoom Loupe Viewport (8 Cols) -->
+    <div class="col-span-12 lg:col-span-8 space-y-4">
+      
+      <!-- Top Lightbox Header -->
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 id="lightbox-filename" class="font-display font-bold text-white text-base">sample_posh_4355_top.ARW</h2>
+          <p class="text-xs text-gray-400">9504 x 6336 px • 61.0 MP Uncompressed RAW • 122.4 MB</p>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <button id="btn-view-100" onclick="toggleLoupeMode(true)" class="px-2.5 py-1 rounded bg-accent/20 border border-accent text-accent font-mono text-xs font-bold transition">100% 1:1 Pixel View</button>
+          <button id="btn-view-fit" onclick="toggleLoupeMode(false)" class="px-2.5 py-1 rounded bg-surface-raised border border-border-subtle text-gray-300 font-mono text-xs hover:text-white transition">Fit to Screen</button>
+        </div>
+      </div>
+
+      <!-- Main Zoom Canvas with Loupe Target -->
+      <div id="loupe-canvas-container" class="relative w-full aspect-[3/2] rounded-xl bg-black border border-border-strong overflow-hidden flex items-center justify-center group shadow-2xl cursor-crosshair">
+        <img id="main-asset-img" src="https://images.unsplash.com/photo-1579546929518-9e396f3cc809?auto=format&fit=crop&w=1400&q=90" class="w-full h-full object-cover select-none">
+
+        <!-- 100% Zoom Loupe Floating Reticle -->
+        <div id="loupe-reticle" class="absolute w-48 h-48 rounded-full border-2 border-accent shadow-2xl bg-black overflow-hidden pointer-events-none transform -translate-x-1/2 -translate-y-1/2 transition-opacity duration-150">
+          <img id="loupe-zoom-img" src="https://images.unsplash.com/photo-1579546929518-9e396f3cc809?auto=format&fit=crop&w=2400&q=100" class="w-[400%] h-[400%] object-cover absolute top-0 left-0">
+          <div class="absolute inset-0 flex items-center justify-center">
+            <div class="w-2 h-2 rounded-full bg-accent"></div>
+          </div>
+          <span class="absolute bottom-2 left-1/2 transform -translate-x-1/2 text-[9px] font-mono font-bold text-accent bg-black/80 px-2 py-0.5 rounded">
+            100% CROP
+          </span>
+        </div>
+
+        <!-- Photometric Light Step Selector Toolbar -->
+        <div class="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-black/85 backdrop-blur px-4 py-2 rounded-full border border-white/10 flex items-center gap-2 font-mono text-xs shadow-2xl">
+          <span class="text-gray-400 text-[10px] pr-2 border-r border-white/10">LIGHT:</span>
+          <button id="btn-light-top" onclick="switchLight('top')" class="w-6 h-6 rounded-full bg-accent text-chassis font-bold text-[10px] transition">TOP</button>
+          <button id="btn-light-1" onclick="switchLight(1)" class="w-6 h-6 rounded-full bg-surface-raised text-gray-300 hover:text-white text-[10px] transition">1</button>
+          <button id="btn-light-2" onclick="switchLight(2)" class="w-6 h-6 rounded-full bg-surface-raised text-gray-300 hover:text-white text-[10px] transition">2</button>
+          <button id="btn-light-3" onclick="switchLight(3)" class="w-6 h-6 rounded-full bg-surface-raised text-gray-300 hover:text-white text-[10px] transition">3</button>
+          <button id="btn-light-4" onclick="switchLight(4)" class="w-6 h-6 rounded-full bg-surface-raised text-gray-300 hover:text-white text-[10px] transition">4</button>
+          <button id="btn-light-5" onclick="switchLight(5)" class="w-6 h-6 rounded-full bg-surface-raised text-gray-300 hover:text-white text-[10px] transition">5</button>
+          <button id="btn-light-6" onclick="switchLight(6)" class="w-6 h-6 rounded-full bg-surface-raised text-gray-300 hover:text-white text-[10px] transition">6</button>
+          <button id="btn-light-7" onclick="switchLight(7)" class="w-6 h-6 rounded-full bg-surface-raised text-gray-300 hover:text-white text-[10px] transition">7</button>
+          <button id="btn-light-8" onclick="switchLight(8)" class="w-6 h-6 rounded-full bg-surface-raised text-gray-300 hover:text-white text-[10px] transition">8</button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- RIGHT: EXIF Telemetry & Batch Operations (4 Cols) -->
+    <div class="col-span-12 lg:col-span-4 space-y-6">
+      
+      <!-- EXIF Telemetry Card -->
+      <div class="p-5 rounded-xl bg-surface border border-border-subtle space-y-4 shadow-lg">
+        <h3 class="font-display font-bold text-white text-sm uppercase tracking-wider">EXIF Hardware Telemetry</h3>
+
+        <div class="space-y-2 font-mono text-xs divide-y divide-border-subtle">
+          <div class="flex justify-between py-1.5">
+            <span class="text-gray-400">CAMERA MODEL</span>
+            <span class="text-white font-bold">Sony ILCE-7RM3</span>
+          </div>
+          <div class="flex justify-between py-1.5">
+            <span class="text-gray-400">LENS</span>
+            <span class="text-white">FE 90mm F2.8 Macro G OSS</span>
+          </div>
+          <div class="flex justify-between py-1.5">
+            <span class="text-gray-400">EXPOSURE</span>
+            <span class="text-accent font-bold">1/125s • f/8.0 • ISO 100</span>
+          </div>
+          <div class="flex justify-between py-1.5">
+            <span class="text-gray-400">FOCAL LENGTH</span>
+            <span class="text-white">90.0 mm</span>
+          </div>
+          <div class="flex justify-between py-1.5">
+            <span class="text-gray-400">COLOR SPACE</span>
+            <span class="text-white">sRGB (Calibrated D65)</span>
+          </div>
+          <div class="flex justify-between py-1.5">
+            <span class="text-gray-400">ESP32 RIG STATE</span>
+            <span id="exif-rig-state" class="text-status-ok font-bold">Top Light (100% PWM)</span>
+          </div>
+        </div>
+
+        <div class="pt-3 space-y-2">
+          <button onclick="downloadRawSet()" class="w-full py-2.5 rounded-lg bg-surface-raised hover:bg-white/10 text-white font-mono text-xs border border-border-strong flex items-center justify-center gap-2 transition active:scale-95 cursor-pointer">
+            <svg class="w-4 h-4 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+            Download RAW + TIFF Set (.zip)
+          </button>
+          <a href="pbr-texture-lab.html" class="w-full py-2.5 rounded-lg bg-accent hover:bg-amber-500 text-chassis font-display font-bold text-xs tracking-wide shadow-lg shadow-accent/20 transition flex items-center justify-center active:scale-95">
+            Send Batch to PBR Processing →
+          </a>
+        </div>
+
+      </div>
+
+    </div>
+
+  </main>
+
+  <script>
+    // Toast notification utility
+    function showToast(message, type = 'info') {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      toast.className = 'px-4 py-2.5 rounded-lg bg-surface-raised border border-border-strong text-xs font-mono text-white shadow-2xl flex items-center gap-2 transform transition-all duration-300 translate-y-2 opacity-0';
+      
+      let icon = '<span class="w-2 h-2 rounded-full bg-accent"></span>';
+      if (type === 'success') icon = '<span class="w-2 h-2 rounded-full bg-status-ok"></span>';
+      if (type === 'warn') icon = '<span class="w-2 h-2 rounded-full bg-status-warn"></span>';
+      
+      toast.innerHTML = `${icon}<span>${message}</span>`;
+      container.appendChild(toast);
+      
+      requestAnimationFrame(() => {
+        toast.classList.remove('translate-y-2', 'opacity-0');
+      });
+      
+      setTimeout(() => {
+        toast.classList.add('opacity-0', 'translate-y-2');
+        setTimeout(() => toast.remove(), 300);
+      }, 3500);
+    }
+
+    // Interactive Deep-Zoom Loupe logic
+    const container = document.getElementById('loupe-canvas-container');
+    const reticle = document.getElementById('loupe-reticle');
+    const zoomImg = document.getElementById('loupe-zoom-img');
+    let loupeEnabled = true;
+
+    container.addEventListener('mousemove', (e) => {
+      if (!loupeEnabled) return;
+      const rect = container.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      reticle.style.left = `${x}px`;
+      reticle.style.top = `${y}px`;
+
+      const pctX = (x / rect.width) * 100;
+      const pctY = (y / rect.height) * 100;
+
+      zoomImg.style.transform = `translate(-${pctX * 3}%, -${pctY * 3}%)`;
+    });
+
+    container.addEventListener('mouseleave', () => {
+      reticle.style.opacity = '0';
+    });
+
+    container.addEventListener('mouseenter', () => {
+      if (loupeEnabled) reticle.style.opacity = '1';
+    });
+
+    function toggleLoupeMode(enabled) {
+      loupeEnabled = enabled;
+      const btn100 = document.getElementById('btn-view-100');
+      const btnFit = document.getElementById('btn-view-fit');
+
+      if (enabled) {
+        reticle.classList.remove('hidden');
+        reticle.style.opacity = '1';
+        btn100.className = 'px-2.5 py-1 rounded bg-accent/20 border border-accent text-accent font-mono text-xs font-bold transition';
+        btnFit.className = 'px-2.5 py-1 rounded bg-surface-raised border border-border-subtle text-gray-300 font-mono text-xs hover:text-white transition';
+        showToast('100% 1:1 Pixel Loupe Mode: ENABLED');
+      } else {
+        reticle.classList.add('hidden');
+        reticle.style.opacity = '0';
+        btnFit.className = 'px-2.5 py-1 rounded bg-accent/20 border border-accent text-accent font-mono text-xs font-bold transition';
+        btn100.className = 'px-2.5 py-1 rounded bg-surface-raised border border-border-subtle text-gray-300 font-mono text-xs hover:text-white transition';
+        showToast('Fit to Screen Mode: ENABLED');
+      }
+    }
+
+    function switchLight(lightId) {
+      const lights = ['top', 1, 2, 3, 4, 5, 6, 7, 8];
+      lights.forEach(id => {
+        const btn = document.getElementById(`btn-light-${id}`);
+        if (id === lightId) {
+          btn.className = 'w-6 h-6 rounded-full bg-accent text-chassis font-bold text-[10px] transition';
+        } else {
+          btn.className = 'w-6 h-6 rounded-full bg-surface-raised text-gray-300 hover:text-white text-[10px] transition';
+        }
+      });
+
+      const label = lightId === 'top' ? 'Top Dome Light' : `Side Spot #${lightId}`;
+      document.getElementById('lightbox-filename').textContent = `sample_posh_4355_${lightId}.ARW`;
+      document.getElementById('exif-rig-state').textContent = `${label} (100% PWM)`;
+      showToast(`Switched view to ${label} (sample_posh_4355_${lightId}.ARW)`);
+    }
+
+    function filterAssets(q) {
+      if (q.trim()) {
+        showToast(`Searching Meilisearch for "${q}"...`);
+      }
+    }
+
+    function downloadRawSet() {
+      showToast('Downloading batch_silk_velvet_4355_raw_set.zip (1.1 GB)...', 'success');
+    }
+  </script>
+</body>
+</html>

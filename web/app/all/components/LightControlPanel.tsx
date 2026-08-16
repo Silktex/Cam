@@ -102,33 +102,63 @@ export default function LightControlPanel({
       </div>
 
       {/* Light list */}
-      <div className="space-y-1">
+      <div className="space-y-1.5">
         {lights.map((light) => (
           <div
             key={light.id}
-            className="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-slate-800/50 transition-colors"
+            onClick={() => setLight(light.id, !light.on)}
+            className={`flex items-center justify-between px-3 py-2 rounded-xl border transition-all cursor-pointer select-none ${
+              light.on
+                ? 'bg-teal-950/40 border-teal-500/40 shadow-sm shadow-teal-500/10'
+                : 'bg-slate-800/40 border-slate-700/60 hover:bg-slate-800/80 hover:border-slate-600'
+            }`}
           >
             <div className="flex items-center gap-2.5">
               <span
-                className={`w-2 h-2 rounded-full ${
-                  light.on ? 'bg-teal-400' : 'bg-slate-600'
+                className={`w-2.5 h-2.5 rounded-full transition-all ${
+                  light.on ? 'bg-teal-400 shadow-sm shadow-teal-400 animate-pulse' : 'bg-slate-600'
                 }`}
               />
-              <span className="text-sm text-slate-300">{light.name}</span>
+              <div>
+                <span className={`text-sm font-medium transition-colors ${light.on ? 'text-white' : 'text-slate-300'}`}>
+                  {light.name}
+                </span>
+                <span className="text-[10px] text-slate-500 block">
+                  GPIO {light.pin}
+                </span>
+              </div>
             </div>
-            {/* Toggle switch */}
-            <button
-              onClick={() => setLight(light.id, !light.on)}
-              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                light.on ? 'bg-teal-500' : 'bg-slate-600'
-              }`}
-            >
+
+            {/* Direct Toggle Button */}
+            <div className="flex items-center gap-2">
               <span
-                className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
-                  light.on ? 'translate-x-[18px]' : 'translate-x-[3px]'
+                className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded transition-colors ${
+                  light.on
+                    ? 'bg-teal-500 text-slate-950 font-extrabold'
+                    : 'bg-slate-700/80 text-slate-400'
                 }`}
-              />
-            </button>
+              >
+                {light.on ? 'ON' : 'OFF'}
+              </span>
+
+              {/* Toggle switch */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setLight(light.id, !light.on);
+                }}
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                  light.on ? 'bg-teal-500' : 'bg-slate-700'
+                }`}
+              >
+                <span
+                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                    light.on ? 'translate-x-[18px]' : 'translate-x-[3px]'
+                  }`}
+                />
+              </button>
+            </div>
           </div>
         ))}
       </div>

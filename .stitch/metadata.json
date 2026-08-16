@@ -1,0 +1,73 @@
+{
+  "projectId": "8012881480995754238",
+  "projectTitle": "Sony A7R III Studio & Photometric Camera System",
+  "stitchUrl": "https://stitch.withgoogle.com/projects/8012881480995754238",
+  "lastRefinedAt": "2026-08-15T19:52:20Z",
+  "screens": [
+    {
+      "station": 1,
+      "screenId": "18084586664963604466",
+      "title": "Station 1: Unified Capture Studio (Live View + Settings + Rig)",
+      "file": ".stitch/designs/unified-capture-studio.html",
+      "screenshotUrl": "https://lh3.googleusercontent.com/aida/AP1WRLs6NIX4Rv3IXEhNtVVGjOqn3HrH_6mUfQYpvWCESm8gozdc4WYfENSyedIW1s6i6KL15jmdhG-bkeVyyC3_dRJBq6GhhukKONrAOLeE3dJortNzq8JoYT7zPZCSvG48Sn3IRXA6mLibD1KowvlXDoeOnU9AxdFRlHLOHuZH33G-rgAHBY6vYi1Vi-JTcOd6aULJ-GIbQuLUcdWbF73Vm773DFAharN09YusPS9ubJDoi11WLDlLQA28Nj9b2_kUaSZ8NPRNHRAEAg",
+      "features": [
+        "Interactive shutter, aperture, ISO, and white balance dials with live HUD sync",
+        "Togglable 9-LED radial light rig with ALL ON/ALL OFF and dimmer",
+        "Live camera overlay controls (Grid, Zebra Clipping, Focus Peaking, Freeze Frame)",
+        "Single-click autofocus pulse and shutter flash with session filmstrip appending"
+      ]
+    },
+    {
+      "station": 2,
+      "screenId": "556589096967590868",
+      "title": "Station 2: Photometric Multi-Light Batch Sequencer",
+      "file": ".stitch/designs/photometric-batch-sequencer.html",
+      "screenshotUrl": "https://lh3.googleusercontent.com/aida/AP1WRLv4MsaPo-1j-Xw7__IivJbk5XHJ6M_SFt36wAFN64cJHVr7me8sbo3w27e-nx8B_rSytUWL6986Y5-JTwV-X-5uW5Rb54SWKr30B_Q9HtcUp9PJMFZz1JKhps_gXeEUBYFIW0rwSz7kSjJRfkCGY773danTKmBlBE8bO-bMqNgrtrtoPu5Ad2EDnv_EyQ5WhSRbf1vkq9t_SQklJ-b61W7TG4-JVgSoePf_tpVRTHdHJLMgavC1kESshSyXVd5vNp0TtSLeg_7nPQ",
+      "features": [
+        "Interactive 9-step sequence execution engine (Top Dome + 8 radial spots)",
+        "Real-time countdown and stepped progress bar (1/9 to 9/9)",
+        "Automated completed batch prepending with direct PBR pipeline shortcut",
+        "Dry run hardware validation mode"
+      ]
+    },
+    {
+      "station": 3,
+      "screenId": "10014097178197951513",
+      "title": "Station 3: Color Science & ColorChecker Calibration",
+      "file": ".stitch/designs/color-calibration-studio.html",
+      "screenshotUrl": "https://lh3.googleusercontent.com/aida/AP1WRLvOuJMsL1bbIVnAROC3_k2_WzQ0bazhipSNiySpRsfJoVqPTnxCWP1as1MTmW6MtsD-IHmNQE5pWNllbQGsKITBhcTUKbyCFVwhdtPALr8pMN2ez9Gqu1qJ6ALgTqQHE4Wnhb7ILbHom1FD83GybNs76QrfzUs_liv6ocbcJXYP6gAI-dvKvyDeQ4UFToEzRoPQtWCEz4YjL_M5_2orb6qSUnNP0un6t0FQ6SckqVvmm3xpp5J7e8aXeMRaJfN41BKquiimTjAOBQ",
+      "features": [
+        "24 clickable X-Rite ColorChecker swatches with CIE2000 Delta-E inspector",
+        "Interactive canvas 90° rotation and horizontal flip transforms",
+        "Automated SAM grid lock simulation (99.8% confidence)",
+        "Calculated 3x3 CCM matrix output and ICC profile exporter"
+      ]
+    },
+    {
+      "station": 4,
+      "screenId": "316587005605544951",
+      "title": "Station 4: PBR Texture Synthesis & Normal Map Lab",
+      "file": ".stitch/designs/pbr-texture-lab.html",
+      "screenshotUrl": "https://lh3.googleusercontent.com/aida/AP1WRLvCRRm-QYuzDQdRiu2SWUKEmnqrbKtv0CcpM9toQ9miz0xhBc6NjA9Hv9GM2cQcc8iFUW6m2qCgY8MztkFdHgC4A0xPoevRwVwuNCtFGDHZuU2cfjQWaocrmJuTPl5rtZm97_hCSoVd9spAH8gCXCTmoAPf--z5Sul804co7VLev-JE6yrCNh5kFZcoZpV21Mv-J4K6bIV8EE2sWTjrqWKTfxdFLvriGaD7fthuzuSdM3d7cUZQFQbuqMDrqXOTWOJrBPucPe6JOA",
+      "features": [
+        "Draggable 3D virtual light probe sphere with live specular highlight tracking",
+        "Synchronized 2x2 quad material viewport (Albedo, Normal, Roughness, Height)",
+        "4K / 8K master resolution selectors and material classification presets",
+        "glTF 2.0 material archive package exporter"
+      ]
+    },
+    {
+      "station": 5,
+      "screenId": "6210015113962678370",
+      "title": "Station 5: Asset Gallery & High-Res Inspection Lightbox",
+      "file": ".stitch/designs/asset-inspection-gallery.html",
+      "screenshotUrl": "https://lh3.googleusercontent.com/aida/AP1WRLvc1JV7tGNuoGPjlrAYUBfcVNG55AVQxcSKxSsnrPxOKHLKV4ahiZLjsJS-Q-VtRvrHKVbh8xp7le2IiXLDnbEToB8PmSKRCbOJNVuvxqAZFnPfVrE2-IpnhhaOxFcp3Bl8ujpp0MaBMyORwMU0alKIlVsqHIVThthGrsN-MZuAaPP7dvyElIHrHwGKqW8A9muVOWt_yYSq__jFN8hdAMBvVI2xUU96gr2dZX4MzW1qdwpVIeJR8qq3nDu80VDKFgMsUksg6pR73g",
+      "features": [
+        "Mouse-tracking 100% 1:1 pixel loupe inspector over 61MP RAW imagery",
+        "Photometric light selector toolbar (TOP + 8 directional spots)",
+        "Meilisearch live search bar and filter controls",
+        "Full EXIF hardware telemetry readout and RAW+TIFF batch download"
+      ]
+    }
+  ]
+}

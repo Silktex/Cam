@@ -218,7 +218,7 @@ export default function EqualizePage() {
       <ActionButton onClick={handlePreview} loading={previewing} variant="secondary">
         Preview
       </ActionButton>
-      <ActionButton onClick={handleApply} loading={applying}>
+      <ActionButton onClick={handleApply} loading={applying} disabled={!previewData}>
         Apply to All
       </ActionButton>
     </>

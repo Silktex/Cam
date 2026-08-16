@@ -9,10 +9,11 @@ import {
   type CameraStatus,
 } from '@/lib/api';
 import { Camera, Power, Settings, Loader2, Wrench, Images, Workflow, Keyboard, Palette } from 'lucide-react';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import ShortcutsModal from './ShortcutsModal';
+import { setLiveViewSource } from '@/lib/api';
 
 export default function DashboardHeader() {
   const queryClient = useQueryClient();
@@ -26,17 +27,30 @@ export default function DashboardHeader() {
     refetchInterval: 5000,
   });
 
+  const autoConnectAttempted = useRef(false);
+
   const connectMutation = useMutation({
     mutationFn: connectCamera,
-    onSuccess: () => {
+    onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['camera'] });
       queryClient.invalidateQueries({ queryKey: ['health'] });
+      setLiveViewSource('hdmi').catch(() => {});
+      setMessage(res.data.message || 'Camera connected');
+      setTimeout(() => setMessage(null), 4000);
     },
     onError: (error: any) => {
       setMessage(error.response?.data?.detail || 'Connection failed');
       setTimeout(() => setMessage(null), 4000);
     },
   });
+
+  // Automatically attempt camera connection and stream start when user lands on page
+  useEffect(() => {
+    if (status && !status.connected && !autoConnectAttempted.current && !connectMutation.isPending) {
+      autoConnectAttempted.current = true;
+      connectMutation.mutate();
+    }
+  }, [status, connectMutation]);
 
   const disconnectMutation = useMutation({
     mutationFn: disconnectCamera,
@@ -86,11 +100,6 @@ export default function DashboardHeader() {
         if (e.key === 'c') {
           e.preventDefault();
           handleToggleConnection();
-          return;
-        }
-        if (e.key === 't') {
-          e.preventDefault();
-          handleTroubleshoot();
           return;
         }
         return;
@@ -194,10 +203,10 @@ export default function DashboardHeader() {
           <button
             onClick={handleToggleConnection}
             disabled={isPending}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 border ${
               isConnected
-                ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
-                : 'bg-teal-600 text-white hover:bg-teal-500'
+                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 hover:bg-red-500/20 hover:text-red-400 hover:border-red-500/40'
+                : 'bg-red-500/20 text-red-400 border-red-500/40 hover:bg-emerald-500/20 hover:text-emerald-400 hover:border-emerald-500/40'
             }`}
           >
             {connectMutation.isPending || disconnectMutation.isPending ? (

@@ -15,3 +15,6 @@ __pycache__/
 camera-data/
 camera-images/
 graphify-out/
+web/.next/
+web/playwright-report/
+web/test-results/

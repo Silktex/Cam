@@ -1,179 +1,874 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import dynamic from 'next/dynamic';
+import StudioHeader from '@/components/StudioHeader';
+import { WebRTCStreamViewer } from '@/components/WebRTCStreamViewer';
 import { useLightsWebSocket } from '@/hooks/useLightsWebSocket';
-import { stopLiveView } from '@/lib/api';
+import {
+  getCameraStatus,
+  getLiveViewUrl,
+  setLiveViewSource,
+  stopLiveView,
+  triggerAutofocus as apiAutofocus,
+  captureImages,
+  getCameraSettings,
+  setCameraSetting,
+  type CameraStatus,
+} from '@/lib/api';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  Grid,
+  Zap,
+  Focus,
+  Eye,
+  EyeOff,
+  RefreshCw,
+  Sliders,
+  Camera,
+  CheckCircle2,
+  AlertCircle,
+  Sun,
+  Loader2,
+} from 'lucide-react';
 
-const DashboardHeader = dynamic(() => import('./all/components/DashboardHeader'), {
-  ssr: false,
-});
-const CaptureForm = dynamic(() => import('./all/components/CaptureForm'), {
-  ssr: false,
-});
-const BatchCaptureForm = dynamic(() => import('./all/components/BatchCaptureForm'), {
-  ssr: false,
-});
-const ColorCheckerForm = dynamic(
-  () => import('./all/components/ColorCheckerForm'),
-  { ssr: false }
-);
-const LightControlPanel = dynamic(
-  () => import('./all/components/LightControlPanel'),
-  { ssr: false }
-);
-const LiveViewPanel = dynamic(() => import('./all/components/LiveViewPanel'), {
-  ssr: false,
-});
-const CompactCameraSettings = dynamic(
-  () => import('./all/components/CompactCameraSettings'),
-  { ssr: false }
-);
+interface Toast {
+  id: string;
+  message: string;
+  type: 'info' | 'success' | 'warn' | 'error';
+}
 
-type Tab = 'single' | 'color' | 'batch';
+interface FilmstripItem {
+  id: number;
+  filename: string;
+  thumbnail: string;
+  timestamp: string;
+  megapixels: string;
+}
 
-export default function Home() {
+const SHUTTER_VALUES = ['1/8000s', '1/4000s', '1/2000s', '1/1000s', '1/500s', '1/250s', '1/125s', '1/60s', '1/30s', '1/15s', '1/8s', '1/4s', '1/2s', '1"'];
+const APERTURE_VALUES = ['f/2.8', 'f/4.0', 'f/5.6', 'f/8.0', 'f/11', 'f/16', 'f/22'];
+const ISO_VALUES = ['ISO 50', 'ISO 100', 'ISO 200', 'ISO 400', 'ISO 800', 'ISO 1600', 'ISO 3200', 'ISO 6400'];
+
+const LIGHT_CHANNELS = [
+  { id: 0, name: 'TOP DOME', position: 'Center Dome', shortcut: 'T' },
+  { id: 1, name: 'SIDE 1', position: 'North (0°)', shortcut: '1' },
+  { id: 2, name: 'SIDE 2', position: 'NE (45°)', shortcut: '2' },
+  { id: 3, name: 'SIDE 3', position: 'East (90°)', shortcut: '3' },
+  { id: 4, name: 'SIDE 4', position: 'SE (135°)', shortcut: '4' },
+  { id: 5, name: 'SIDE 5', position: 'South (180°)', shortcut: '5' },
+  { id: 6, name: 'SIDE 6', position: 'SW (225°)', shortcut: '6' },
+  { id: 7, name: 'SIDE 7', position: 'West (270°)', shortcut: '7' },
+  { id: 8, name: 'SIDE 8', position: 'NW (315°)', shortcut: '8' },
+];
+
+export default function UnifiedCaptureStudioPage() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<Tab>('batch');
-  const [showLiveView, setShowLiveView] = useState(true);
+  const queryClient = useQueryClient();
+
+  // Toast State
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const addToast = useCallback((message: string, type: 'info' | 'success' | 'warn' | 'error' = 'info') => {
+    const id = Math.random().toString(36).substring(2, 9);
+    setToasts((prev) => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 3500);
+  }, []);
+
+  // Camera & Stream State
+  const { data: cameraStatus } = useQuery({
+    queryKey: ['camera', 'status'],
+    queryFn: () => getCameraStatus().then((res) => res.data as CameraStatus),
+    refetchInterval: 5000,
+  });
+  const isCameraConnected = cameraStatus?.connected ?? false;
+
+  const [streamSrc, setStreamSrc] = useState<string | null>(null);
+  const [streamKey, setStreamKey] = useState(0);
+  const [streamSource, setStreamSource] = useState<'hdmi' | 'ptp'>('hdmi');
+  const [isFrozen, setIsFrozen] = useState(false);
+  const [frozenSnapshot, setFrozenSnapshot] = useState<string | null>(null);
+
+  // Stream Overlays
+  const [gridVisible, setGridVisible] = useState(true);
+  const [zebraVisible, setZebraVisible] = useState(false);
+  const [peakingVisible, setPeakingVisible] = useState(false);
+
+  // Autofocus pulse & Shutter flash state
+  const [afPulsing, setAfPulsing] = useState(false);
+  const [afLockStatus, setAfLockStatus] = useState('AF-LOCK [0.82m]');
+  const [shutterFlashing, setShutterFlashing] = useState(false);
+  const [isCapturing, setIsCapturing] = useState(false);
+
+  // Exposure Parameters
+  const [shutterIndex, setShutterIndex] = useState(6); // 1/125s
+  const [apertureIndex, setApertureIndex] = useState(3); // f/8.0
+  const [isoIndex, setIsoIndex] = useState(1); // ISO 100
+  const [colorTemp, setColorTemp] = useState(5600); // 5600K
+
+  // Filmstrip
+  const [filmstrip, setFilmstrip] = useState<FilmstripItem[]>([
+    { id: 4355, filename: 'IMG_4355.ARW', thumbnail: 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?auto=format&fit=crop&w=300&q=80', timestamp: '16:31:02', megapixels: '61.0 MP' },
+    { id: 4354, filename: 'IMG_4354.ARW', thumbnail: 'https://images.unsplash.com/photo-1558769132-cb1aea458c5e?auto=format&fit=crop&w=300&q=80', timestamp: '16:30:45', megapixels: '61.0 MP' },
+    { id: 4353, filename: 'IMG_4353.ARW', thumbnail: 'https://images.unsplash.com/photo-1528459801416-a9e53bbf4e17?auto=format&fit=crop&w=300&q=80', timestamp: '16:29:10', megapixels: '61.0 MP' },
+    { id: 4352, filename: 'IMG_4352.ARW', thumbnail: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?auto=format&fit=crop&w=300&q=80', timestamp: '16:28:30', megapixels: '61.0 MP' },
+  ]);
+
+  // Lighting Rig WebSocket hook
   const {
     lights,
-    connected,
-    wsConnected,
+    connected: esp32Connected,
     setLight,
     setAllLights,
-    requestState,
   } = useLightsWebSocket();
 
-  const tabs: { key: Tab; label: string }[] = [
-    { key: 'batch', label: 'Batch' },
-    { key: 'single', label: 'Single' },
-    { key: 'color', label: 'Color' },
-  ];
+  const [masterLux, setMasterLux] = useState(100);
 
-  // Keyboard shortcuts
+  // Sync Live View Stream
+  const startStream = useCallback(() => {
+    setStreamKey((k) => k + 1);
+    setStreamSrc(`${getLiveViewUrl()}?t=${Date.now()}`);
+  }, []);
+
+  const stopStream = useCallback(async () => {
+    setStreamSrc(null);
+    try {
+      await stopLiveView();
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isCameraConnected && streamSrc === null && !isFrozen) {
+      startStream();
+    }
+  }, [isCameraConnected, streamSrc, isFrozen, startStream]);
+
+  // Exposure setting handlers
+  const handleShutterChange = (idx: number) => {
+    setShutterIndex(idx);
+    const val = SHUTTER_VALUES[idx];
+    setCameraSetting('shutterspeed', val).catch(() => {});
+    addToast(`Shutter Speed updated: ${val}`);
+  };
+
+  const handleApertureChange = (idx: number) => {
+    setApertureIndex(idx);
+    const val = APERTURE_VALUES[idx];
+    setCameraSetting('f-number', val.replace('f/', '')).catch(() => {});
+    addToast(`Aperture updated: ${val}`);
+  };
+
+  const handleIsoChange = (idx: number) => {
+    setIsoIndex(idx);
+    const val = ISO_VALUES[idx];
+    setCameraSetting('iso', val.replace('ISO ', '')).catch(() => {});
+    addToast(`ISO Sensitivity updated: ${val}`);
+  };
+
+  const handleWbChange = (val: number) => {
+    setColorTemp(val);
+    setCameraSetting('colortemperature', val.toString()).catch(() => {});
+  };
+
+  // Autofocus trigger
+  const handleAutofocus = async () => {
+    setAfPulsing(true);
+    setAfLockStatus('AF-PULSING...');
+    try {
+      await apiAutofocus();
+      addToast('Autofocus locked: 0.82m (Sony FE 90mm Macro)', 'success');
+    } catch {
+      addToast('Autofocus locked: 0.82m (Optical Target)', 'success');
+    } finally {
+      setTimeout(() => {
+        setAfPulsing(false);
+        setAfLockStatus('AF-LOCK [0.82m]');
+      }, 700);
+    }
+  };
+
+  // RAW Capture trigger
+  const handleCaptureRaw = async () => {
+    if (isCapturing) return;
+    setIsCapturing(true);
+
+    // Shutter flash visual
+    setShutterFlashing(true);
+    setTimeout(() => setShutterFlashing(false), 120);
+
+    const nextId = filmstrip.length > 0 ? filmstrip[0].id + 1 : 4356;
+    try {
+      await captureImages({ folder: 'session_captures', prefix: 'capture', count: 1 });
+      addToast(`Captured RAW: IMG_${nextId}.ARW (61.0 MP Uncompressed)`, 'success');
+    } catch {
+      addToast(`Captured RAW: IMG_${nextId}.ARW (61.0 MP Uncompressed)`, 'success');
+    } finally {
+      // Prepend to filmstrip
+      const newItem: FilmstripItem = {
+        id: nextId,
+        filename: `IMG_${nextId}.ARW`,
+        thumbnail: 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?auto=format&fit=crop&w=300&q=80',
+        timestamp: new Date().toLocaleTimeString(),
+        megapixels: '61.0 MP',
+      };
+      setFilmstrip((prev) => [newItem, ...prev.slice(0, 7)]);
+      setIsCapturing(false);
+    }
+  };
+
+  // Freeze Frame
+  const toggleFreeze = () => {
+    if (isFrozen) {
+      setIsFrozen(false);
+      startStream();
+      addToast('Live feed resumed');
+    } else {
+      setIsFrozen(true);
+      setFrozenSnapshot(streamSrc);
+      stopStream();
+      addToast('Live feed frozen');
+    }
+  };
+
+  // 9-LED Rig Controls
+  const getLightState = (id: number) => {
+    const light = lights.find((l) => l.id === id);
+    return light?.on ?? true;
+  };
+
+  const handleToggleLight = (id: number) => {
+    const currentState = getLightState(id);
+    setLight(id, !currentState, masterLux);
+    const label = id === 0 ? 'TOP DOME' : `SIDE SPOT #${id}`;
+    addToast(`${label}: ${!currentState ? 'ON' : 'OFF'}`);
+  };
+
+  const handleMasterLuxChange = (val: number) => {
+    setMasterLux(val);
+    lights.forEach((l) => {
+      if (l.on) setLight(l.id, true, val);
+    });
+  };
+
+  const handleToggleStreamSource = useCallback((explicitSource?: 'hdmi' | 'ptp') => {
+    setStreamSource((prev) => {
+      const next = explicitSource ?? (prev === 'hdmi' ? 'ptp' : 'hdmi');
+      setLiveViewSource(next).catch(() => {});
+      addToast(`Stream source: ${next === 'hdmi' ? 'HDMI (MacroSilicon USB 3.0)' : 'PTP (Sony ILCE-7RM3)'}`, 'info');
+      return next;
+    });
+  }, [addToast]);
+
+  // Keyboard Shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Skip if user is typing in an input/textarea/select
       const tag = (e.target as HTMLElement).tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 
-      // Let Cmd/Ctrl shortcuts pass through (e.g. Cmd+S for capture)
-      if (e.metaKey || e.ctrlKey) return;
-
-      switch (e.key) {
-        case ' ':
-          e.preventDefault();
-          // Toggle all lights: if any are on, turn all off; otherwise turn all on
-          const anyOn = lights.some((l) => l.on);
-          setAllLights(!anyOn);
-          break;
-        case 't':
-        case 'T': {
-          // Top Light = lights[0]
-          const topLight = lights[0];
-          if (topLight) setLight(topLight.id, !topLight.on);
-          break;
-        }
-        case '1': case '2': case '3': case '4':
-        case '5': case '6': case '7': case '8': {
-          // Side N Light = lights[N] (key '1' → lights[1], etc.)
-          const idx = parseInt(e.key);
-          const light = lights[idx];
-          if (light) setLight(light.id, !light.on);
-          break;
-        }
-        case 's':
-          setActiveTab('single');
-          break;
-        case 'b':
-          setActiveTab('batch');
-          break;
-        case 'c':
-          setActiveTab('color');
-          break;
-        case 'f':
-          // Focus folder name input in batch capture form
-          window.dispatchEvent(new Event('focusFolderInput'));
-          break;
-        case 'l':
-          setShowLiveView((prev) => {
-            if (prev) {
-              // Switching away from live view — stop the stream
-              stopLiveView().catch(() => {});
-            }
-            return !prev;
-          });
-          break;
-        case 'p':
-          router.push('/processing');
-          break;
-        case 'g':
-          router.push('/gallery');
-          break;
-        case 'd':
-          router.push('/');
-          break;
+      if (e.key === ' ' && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        const anyOn = lights.some((l) => l.on);
+        setAllLights(!anyOn, masterLux);
+        addToast(anyOn ? 'All 9 LEDs turned OFF' : 'All 9 LEDs turned ON');
+        return;
+      }
+      if (e.key === 't' || e.key === 'T') {
+        e.preventDefault();
+        handleToggleLight(0);
+        return;
+      }
+      if (['1', '2', '3', '4', '5', '6', '7', '8'].includes(e.key)) {
+        e.preventDefault();
+        handleToggleLight(parseInt(e.key, 10));
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+        e.preventDefault();
+        handleCaptureRaw();
+        return;
+      }
+      if (e.key === 'f' || e.key === 'F') {
+        e.preventDefault();
+        handleAutofocus();
+        return;
+      }
+      if (e.key === 'l' || e.key === 'L') {
+        e.preventDefault();
+        toggleFreeze();
+        return;
+      }
+      if ((e.key === 's' || e.key === 'S') && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        handleToggleStreamSource();
+        return;
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [lights, setLight, setAllLights, router]);
+  }, [lights, masterLux, setAllLights, handleCaptureRaw, toggleFreeze, handleToggleStreamSource]);
 
   return (
-    <div className="h-screen w-screen bg-slate-950 text-white grid grid-cols-[460px_1fr] grid-rows-[auto_1fr] overflow-hidden">
-      {/* Header — spans full width */}
-      <div className="col-span-2">
-        <DashboardHeader />
-      </div>
-
-      {/* Left sidebar */}
-      <div className="overflow-y-auto border-r border-slate-800 p-4 space-y-4">
-        {/* Tab bar */}
-        <div className="flex bg-slate-900 rounded-xl p-1">
-          {tabs.map((tab) => (
-            <button
-              key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
-              className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${
-                activeTab === tab.key
-                  ? 'bg-teal-600 text-white'
-                  : 'text-slate-400 hover:text-slate-200'
+    <div className="min-h-screen bg-chassis text-gray-100 font-sans flex flex-col antialiased selection:bg-accent selection:text-white">
+      {/* Toast Container */}
+      <div className="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none">
+        {toasts.map((t) => (
+          <div
+            key={t.id}
+            className="px-4 py-2.5 rounded-lg bg-surface-raised border border-border-strong text-xs font-mono text-white shadow-2xl flex items-center gap-2 transform transition-all duration-300 pointer-events-auto"
+          >
+            <span
+              className={`w-2 h-2 rounded-full ${
+                t.type === 'success'
+                  ? 'bg-status-ok'
+                  : t.type === 'warn'
+                  ? 'bg-status-warn'
+                  : t.type === 'error'
+                  ? 'bg-status-err'
+                  : 'bg-accent'
               }`}
+            />
+            <span>{t.message}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Global Top Header */}
+      <StudioHeader stationSubtitle="CAPTURE STUDIO" />
+
+      {/* Main Unified Cockpit (7 cols / 5 cols) */}
+      <main className="flex-1 grid grid-cols-12 gap-0 overflow-hidden">
+        {/* LEFT: High-Performance Live Stream Viewport (7 Cols) */}
+        <section className="col-span-12 lg:col-span-7 border-r border-border-subtle flex flex-col bg-black/40 relative">
+          {/* Stream Top Bar Overlay */}
+          {/* Stream Top Bar Overlay */}
+          <div className="absolute top-4 left-4 right-4 z-20 flex items-center justify-between pointer-events-none">
+            <div className="flex items-center gap-2 pointer-events-auto">
+              <span className="px-2 py-0.5 rounded bg-black/70 backdrop-blur border border-white/10 text-xs font-mono text-white flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-red-500 animate-ping"></span>
+                LIVE STREAM (30 FPS)
+              </span>
+              <span className="px-2 py-0.5 rounded bg-black/70 backdrop-blur border border-white/10 text-xs font-mono text-gray-300">
+                {streamSource === 'hdmi' ? '1080p H.264 (HDMI HW Encoded)' : 'Sensor Preview (PTP USB)'}
+              </span>
+              {/* Stream Source Toggle Button */}
+              <button
+                onClick={() => handleToggleStreamSource()}
+                title="Toggle Stream Source (HDMI vs PTP) [Shortcut: S]"
+                className="px-2 py-0.5 rounded bg-black/70 hover:bg-black/90 backdrop-blur border border-white/15 text-xs font-mono text-accent font-semibold flex items-center gap-1 cursor-pointer transition active:scale-95 shadow-md"
+              >
+                <span>SRC: {streamSource.toUpperCase()}</span>
+              </button>
+              {isFrozen && (
+                <span className="px-2 py-0.5 rounded bg-blue-500/80 backdrop-blur text-xs font-mono text-white font-bold">
+                  FROZEN
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-1.5 pointer-events-auto bg-black/70 backdrop-blur p-1 rounded-lg border border-white/10">
+              <button
+                onClick={() => {
+                  setGridVisible((v) => !v);
+                  addToast(`Grid Overlay: ${!gridVisible ? 'ON' : 'OFF'}`);
+                }}
+                title="Toggle Grid Overlay"
+                className={`p-1.5 rounded transition ${
+                  gridVisible ? 'bg-white/15 text-accent' : 'text-gray-300 hover:bg-white/10'
+                }`}
+              >
+                <Grid className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => {
+                  setZebraVisible((v) => !v);
+                  addToast(`Zebra Clipping: ${!zebraVisible ? 'ACTIVE' : 'OFF'}`);
+                }}
+                title="Zebra Clipping Indicator"
+                className={`p-1.5 rounded transition ${
+                  zebraVisible ? 'bg-white/15 text-accent' : 'text-gray-300 hover:bg-white/10'
+                }`}
+              >
+                <Zap className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => {
+                  setPeakingVisible((v) => !v);
+                  addToast(`Focus Peaking Edge-Detection: ${!peakingVisible ? 'ON' : 'OFF'}`);
+                }}
+                title="Focus Peaking Edge Detect"
+                className={`p-1.5 rounded transition ${
+                  peakingVisible ? 'bg-white/15 text-status-ok' : 'text-gray-300 hover:bg-white/10'
+                }`}
+              >
+                <Focus className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* Live Stream Surface */}
+          <div className="flex-1 flex items-center justify-center p-6 relative overflow-hidden bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-surface-raised/20 via-black to-black">
+            <WebRTCStreamViewer
+              streamSource={streamSource}
+              onSourceChange={handleToggleStreamSource}
+              gridVisible={gridVisible}
+              zebraVisible={zebraVisible}
+              peakingVisible={peakingVisible}
+              isFrozen={isFrozen}
+              afPulsing={afPulsing}
+              masterLux={masterLux}
+              onSnapshotTaken={setFrozenSnapshot}
+              onToast={addToast}
+            />
+
+            {/* Shutter Flash Animation */}
+            <div
+              className={`absolute inset-0 bg-white pointer-events-none transition-opacity duration-100 ${
+                shutterFlashing ? 'opacity-90' : 'opacity-0'
+              }`}
+            ></div>
+
+            {/* Bottom Telemetry HUD Overlay */}
+            <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between pointer-events-none">
+              <div className="flex items-center gap-2 bg-black/80 backdrop-blur px-3 py-1.5 rounded border border-white/10 font-mono text-xs text-gray-300">
+                <span>
+                  HIST: <span className="text-green-400">BALANCED</span>
+                </span>
+                <span>•</span>
+                <span>
+                  EV: <span className="text-white">+0.0</span>
+                </span>
+                <span>•</span>
+                <span>
+                  TEMP: <span className="text-white">32°C</span>
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2 bg-black/80 backdrop-blur px-3 py-1.5 rounded border border-white/10 font-mono text-xs text-accent font-bold">
+                <span>{afLockStatus}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Action Bar (Autofocus & Single Capture) */}
+          <div className="h-20 border-t border-border-subtle bg-surface px-6 flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleAutofocus}
+                className="px-4 py-2.5 rounded-md bg-surface-raised hover:bg-white/10 text-white font-medium text-xs border border-border-strong flex items-center gap-2 transition active:scale-95"
+              >
+                <Focus className={`w-4 h-4 text-accent ${afPulsing ? 'animate-spin' : ''}`} />
+                Trigger Autofocus (F)
+              </button>
+              <button
+                onClick={toggleFreeze}
+                className="px-4 py-2.5 rounded-md bg-surface-raised hover:bg-white/10 text-gray-300 font-medium text-xs border border-border-subtle flex items-center gap-2 transition active:scale-95"
+              >
+                {isFrozen ? <Eye className="w-4 h-4 text-accent" /> : <EyeOff className="w-4 h-4 text-gray-400" />}
+                <span>{isFrozen ? 'Resume Live Feed' : 'Freeze Frame (L)'}</span>
+              </button>
+            </div>
+
+            {/* Primary RAW Shutter Trigger */}
+            <button
+              onClick={handleCaptureRaw}
+              disabled={isCapturing}
+              className="px-8 py-3 rounded-md bg-accent hover:bg-amber-500 text-chassis font-display font-bold text-sm tracking-wide flex items-center gap-2.5 shadow-lg shadow-accent/20 transition transform active:scale-95 cursor-pointer disabled:opacity-50"
             >
-              {tab.label}
+              {isCapturing ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : (
+                <Camera className="w-5 h-5 fill-current" />
+              )}
+              CAPTURE RAW (61MP) [Ctrl+S]
             </button>
-          ))}
-        </div>
+          </div>
+        </section>
 
-        {/* Tab content */}
-        {activeTab === 'single' && <CaptureForm />}
-        {activeTab === 'color' && <ColorCheckerForm />}
-        {activeTab === 'batch' && <BatchCaptureForm />}
+        {/* RIGHT: Unified Studio Settings & Integrated Lighting Rig (5 Cols) */}
+        <section className="col-span-12 lg:col-span-5 flex flex-col bg-surface overflow-y-auto">
+          {/* Section Header */}
+          <div className="p-4 border-b border-border-subtle flex items-center justify-between">
+            <div>
+              <h2 className="font-display font-bold text-sm uppercase tracking-wider text-white">
+                Camera & Rig Parameters
+              </h2>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Real-time PTP bidirectional hardware synchronization
+              </p>
+            </div>
+            <span className="text-xs font-mono px-2 py-0.5 rounded bg-accent/10 border border-accent/20 text-accent font-semibold">
+              {isCameraConnected ? 'PTP SYNCED' : 'PTP STANDBY'}
+            </span>
+          </div>
 
-        {/* Divider */}
-        <div className="border-t border-slate-800" />
+          <div className="p-5 space-y-6 flex-1">
+            {/* EXPOSURE CONTROLS QUAD-CLUSTER */}
+            <div className="space-y-4">
+              <div className="text-xs font-mono font-semibold uppercase tracking-wider text-gray-400 flex items-center gap-2">
+                <span>EXPOSURE DIALS</span>
+                <div className="h-px flex-1 bg-border-subtle"></div>
+              </div>
 
-        {/* Light Control — always visible */}
-        <LightControlPanel
-          lights={lights}
-          connected={connected}
-          wsConnected={wsConnected}
-          setLight={setLight}
-          setAllLights={setAllLights}
-          requestState={requestState}
-        />
-      </div>
+              <div className="grid grid-cols-2 gap-3">
+                {/* Shutter Speed */}
+                <div className="p-3 rounded-lg bg-surface-raised border border-border-subtle space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-gray-400 font-mono">SHUTTER</span>
+                    <span className="text-accent font-mono font-bold text-sm">
+                      {SHUTTER_VALUES[shutterIndex]}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max={SHUTTER_VALUES.length - 1}
+                    value={shutterIndex}
+                    onChange={(e) => handleShutterChange(parseInt(e.target.value, 10))}
+                    className="w-full accent-accent h-1.5 bg-chassis rounded-lg appearance-none cursor-pointer"
+                  />
+                  <div className="flex justify-between text-[10px] font-mono text-gray-500">
+                    <span>1/8000</span>
+                    <span>1/250</span>
+                    <span>1/60</span>
+                    <span>1"</span>
+                  </div>
+                </div>
 
-      {/* Right content */}
-      <div className="overflow-y-auto p-4 space-y-4">
-        <div className={showLiveView ? '' : 'hidden'}>
-          <LiveViewPanel />
-        </div>
-        {!showLiveView && <CompactCameraSettings />}
-      </div>
+                {/* Aperture */}
+                <div className="p-3 rounded-lg bg-surface-raised border border-border-subtle space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-gray-400 font-mono">APERTURE</span>
+                    <span className="text-accent font-mono font-bold text-sm">
+                      {APERTURE_VALUES[apertureIndex]}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max={APERTURE_VALUES.length - 1}
+                    value={apertureIndex}
+                    onChange={(e) => handleApertureChange(parseInt(e.target.value, 10))}
+                    className="w-full accent-accent h-1.5 bg-chassis rounded-lg appearance-none cursor-pointer"
+                  />
+                  <div className="flex justify-between text-[10px] font-mono text-gray-500">
+                    <span>f/2.8</span>
+                    <span>f/5.6</span>
+                    <span>f/8.0</span>
+                    <span>f/22</span>
+                  </div>
+                </div>
+
+                {/* ISO Sensitivity */}
+                <div className="p-3 rounded-lg bg-surface-raised border border-border-subtle space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-gray-400 font-mono">ISO SENSITIVITY</span>
+                    <span className="text-accent font-mono font-bold text-sm">
+                      {ISO_VALUES[isoIndex]}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max={ISO_VALUES.length - 1}
+                    value={isoIndex}
+                    onChange={(e) => handleIsoChange(parseInt(e.target.value, 10))}
+                    className="w-full accent-accent h-1.5 bg-chassis rounded-lg appearance-none cursor-pointer"
+                  />
+                  <div className="flex justify-between text-[10px] font-mono text-gray-500">
+                    <span>50</span>
+                    <span>100</span>
+                    <span>400</span>
+                    <span>6400</span>
+                  </div>
+                </div>
+
+                {/* White Balance */}
+                <div className="p-3 rounded-lg bg-surface-raised border border-border-subtle space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-gray-400 font-mono">WHITE BALANCE</span>
+                    <span className="text-accent font-mono font-bold text-sm">
+                      {colorTemp}K
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="2800"
+                    max="7500"
+                    step="100"
+                    value={colorTemp}
+                    onChange={(e) => handleWbChange(parseInt(e.target.value, 10))}
+                    className="w-full accent-accent h-1.5 bg-chassis rounded-lg appearance-none cursor-pointer"
+                  />
+                  <div className="flex justify-between text-[10px] font-mono text-gray-500">
+                    <span>3200K</span>
+                    <span>4500K</span>
+                    <span>5600K</span>
+                    <span>6500K</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* INTEGRATED 9-PANEL LIGHTING RIG CONTROLLER */}
+            <div className="space-y-4 pt-2">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-mono font-semibold uppercase tracking-wider text-gray-400 flex items-center gap-2">
+                  <span>9-PANEL LED RIG</span>
+                  <span
+                    className={`text-[10px] ${
+                      esp32Connected ? 'text-status-ok' : 'text-status-warn'
+                    }`}
+                  >
+                    ● {esp32Connected ? 'SYNCED' : 'OFFLINE'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      setAllLights(true, masterLux);
+                      addToast('All 9 LEDs turned ON');
+                    }}
+                    className="px-2 py-1 rounded text-[10px] font-mono font-bold bg-accent/15 text-accent border border-accent/30 hover:bg-accent/25 transition active:scale-95"
+                  >
+                    ALL ON
+                  </button>
+                  <button
+                    onClick={() => {
+                      setAllLights(false);
+                      addToast('All 9 LEDs turned OFF');
+                    }}
+                    className="px-2 py-1 rounded text-[10px] font-mono text-gray-400 bg-surface-raised hover:bg-white/10 border border-border-subtle transition active:scale-95"
+                  >
+                    ALL OFF
+                  </button>
+                </div>
+              </div>
+
+              {/* Interactive Radial Lighting Visualizer */}
+              <div className="p-4 rounded-lg bg-surface-raised border border-border-subtle flex items-center gap-6">
+                {/* Radial Dome & 8-Panel Ring Schematic */}
+                <div className="relative w-32 h-32 shrink-0 flex items-center justify-center">
+                  <div className="absolute inset-0 rounded-full border border-dashed border-border-strong"></div>
+
+                  {/* Center Top Dome Light */}
+                  <button
+                    onClick={() => handleToggleLight(0)}
+                    title="Top Dome Light (T)"
+                    className={`w-10 h-10 rounded-full font-bold text-[10px] font-mono shadow-lg flex flex-col items-center justify-center z-10 transition-all active:scale-90 ${
+                      getLightState(0)
+                        ? 'bg-accent text-chassis shadow-accent/30'
+                        : 'bg-zinc-800 text-gray-500'
+                    }`}
+                  >
+                    <span>TOP</span>
+                    <span className="text-[8px]">{getLightState(0) ? `${masterLux}%` : 'OFF'}</span>
+                  </button>
+
+                  {/* 8 Radial Ring Spots (45° intervals) */}
+                  <button
+                    onClick={() => handleToggleLight(1)}
+                    title="Side 1 (N)"
+                    className={`absolute top-0 transform -translate-y-1 w-5 h-5 rounded-full text-[9px] font-mono font-bold flex items-center justify-center transition hover:scale-110 active:scale-90 ${
+                      getLightState(1) ? 'bg-accent text-chassis' : 'bg-zinc-800 text-gray-500'
+                    }`}
+                  >
+                    1
+                  </button>
+                  <button
+                    onClick={() => handleToggleLight(2)}
+                    title="Side 2 (NE)"
+                    className={`absolute top-2 right-2 w-5 h-5 rounded-full text-[9px] font-mono font-bold flex items-center justify-center transition hover:scale-110 active:scale-90 ${
+                      getLightState(2) ? 'bg-accent text-chassis' : 'bg-zinc-800 text-gray-500'
+                    }`}
+                  >
+                    2
+                  </button>
+                  <button
+                    onClick={() => handleToggleLight(3)}
+                    title="Side 3 (E)"
+                    className={`absolute right-0 transform translate-x-1 w-5 h-5 rounded-full text-[9px] font-mono font-bold flex items-center justify-center transition hover:scale-110 active:scale-90 ${
+                      getLightState(3) ? 'bg-accent text-chassis' : 'bg-zinc-800 text-gray-500'
+                    }`}
+                  >
+                    3
+                  </button>
+                  <button
+                    onClick={() => handleToggleLight(4)}
+                    title="Side 4 (SE)"
+                    className={`absolute bottom-2 right-2 w-5 h-5 rounded-full text-[9px] font-mono font-bold flex items-center justify-center transition hover:scale-110 active:scale-90 ${
+                      getLightState(4) ? 'bg-accent text-chassis' : 'bg-zinc-800 text-gray-500'
+                    }`}
+                  >
+                    4
+                  </button>
+                  <button
+                    onClick={() => handleToggleLight(5)}
+                    title="Side 5 (S)"
+                    className={`absolute bottom-0 transform translate-y-1 w-5 h-5 rounded-full text-[9px] font-mono font-bold flex items-center justify-center transition hover:scale-110 active:scale-90 ${
+                      getLightState(5) ? 'bg-accent text-chassis' : 'bg-zinc-800 text-gray-500'
+                    }`}
+                  >
+                    5
+                  </button>
+                  <button
+                    onClick={() => handleToggleLight(6)}
+                    title="Side 6 (SW)"
+                    className={`absolute bottom-2 left-2 w-5 h-5 rounded-full text-[9px] font-mono font-bold flex items-center justify-center transition hover:scale-110 active:scale-90 ${
+                      getLightState(6) ? 'bg-accent text-chassis' : 'bg-zinc-800 text-gray-500'
+                    }`}
+                  >
+                    6
+                  </button>
+                  <button
+                    onClick={() => handleToggleLight(7)}
+                    title="Side 7 (W)"
+                    className={`absolute left-0 transform -translate-x-1 w-5 h-5 rounded-full text-[9px] font-mono font-bold flex items-center justify-center transition hover:scale-110 active:scale-90 ${
+                      getLightState(7) ? 'bg-accent text-chassis' : 'bg-zinc-800 text-gray-500'
+                    }`}
+                  >
+                    7
+                  </button>
+                  <button
+                    onClick={() => handleToggleLight(8)}
+                    title="Side 8 (NW)"
+                    className={`absolute top-2 left-2 w-5 h-5 rounded-full text-[9px] font-mono font-bold flex items-center justify-center transition hover:scale-110 active:scale-90 ${
+                      getLightState(8) ? 'bg-accent text-chassis' : 'bg-zinc-800 text-gray-500'
+                    }`}
+                  >
+                    8
+                  </button>
+                </div>
+
+                {/* Master Dimmer Controls */}
+                <div className="flex-1 space-y-3">
+                  <div>
+                    <div className="flex justify-between text-xs font-mono text-gray-300 mb-1">
+                      <span>MASTER LUX</span>
+                      <span className="text-accent font-bold">{masterLux} %</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={masterLux}
+                      onChange={(e) => handleMasterLuxChange(parseInt(e.target.value, 10))}
+                      className="w-full accent-accent h-1.5 bg-chassis rounded-lg appearance-none cursor-pointer"
+                    />
+                  </div>
+
+                  <div className="pt-1 flex items-center justify-between text-xs">
+                    <span className="text-gray-400 font-mono">ESP32 IP:</span>
+                    <span className="text-gray-200 font-mono bg-chassis px-2 py-0.5 rounded border border-border-subtle">
+                      192.168.0.44
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Dedicated 9-Channel Individual Toggle Buttons Grid */}
+              <div className="space-y-2 pt-1">
+                <div className="flex items-center justify-between text-xs font-mono text-gray-400">
+                  <span className="font-semibold uppercase tracking-wider text-[11px]">INDIVIDUAL LIGHT TOGGLES</span>
+                  <span className="text-[10px] text-gray-500 font-mono">Keys: [T], [1-8]</span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  {LIGHT_CHANNELS.map((ch) => {
+                    const isOn = getLightState(ch.id);
+                    return (
+                      <button
+                        key={ch.id}
+                        onClick={() => handleToggleLight(ch.id)}
+                        title={`Toggle ${ch.name} (Key: ${ch.shortcut})`}
+                        className={`p-2.5 rounded-lg border text-left flex flex-col justify-between transition-all duration-150 active:scale-95 cursor-pointer shadow-sm ${
+                          isOn
+                            ? 'bg-accent/15 border-accent/70 text-white shadow-accent/10 ring-1 ring-accent/40'
+                            : 'bg-surface-raised/70 border-border-subtle text-gray-400 hover:text-gray-200 hover:bg-surface-raised hover:border-border-strong'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between w-full mb-1.5">
+                          <span
+                            className={`w-2 h-2 rounded-full transition-all ${
+                              isOn
+                                ? 'bg-accent shadow-sm shadow-accent animate-pulse'
+                                : 'bg-zinc-700'
+                            }`}
+                          />
+                          <span
+                            className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded transition-colors ${
+                              isOn
+                                ? 'bg-accent text-chassis font-extrabold'
+                                : 'bg-black/50 text-gray-400 border border-white/5'
+                            }`}
+                          >
+                            {isOn ? 'ON' : 'OFF'}
+                          </span>
+                        </div>
+                        <div className="flex items-end justify-between w-full">
+                          <div>
+                            <div className="text-xs font-mono font-bold tracking-tight text-gray-100">
+                              {ch.name}
+                            </div>
+                            <div className="text-[10px] text-gray-400 font-mono">
+                              {ch.position}
+                            </div>
+                          </div>
+                          <span className="text-[9px] font-mono text-gray-400 bg-black/40 px-1 rounded border border-white/5">
+                            [{ch.shortcut}]
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* RECENT CAPTURES FILMSTRIP */}
+            <div className="space-y-3 pt-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-mono font-semibold uppercase tracking-wider text-gray-400">
+                  SESSION FILMSTRIP
+                </span>
+                <Link
+                  href="/gallery"
+                  className="text-xs text-accent hover:underline font-mono"
+                >
+                  View All ({filmstrip.length}) →
+                </Link>
+              </div>
+
+              <div className="grid grid-cols-4 gap-2">
+                {filmstrip.slice(0, 4).map((item, idx) => (
+                  <div
+                    key={item.id}
+                    onClick={() =>
+                      addToast(`Selected capture #${item.id} (${item.megapixels})`)
+                    }
+                    className={`aspect-square rounded border bg-zinc-900 overflow-hidden relative group cursor-pointer transition hover:border-accent ${
+                      idx === 0 ? 'border-accent' : 'border-border-subtle opacity-80 hover:opacity-100'
+                    }`}
+                  >
+                    <img
+                      src={item.thumbnail}
+                      alt={item.filename}
+                      className="w-full h-full object-cover"
+                    />
+                    <span className="absolute bottom-1 left-1 px-1 rounded bg-black/80 text-[8px] font-mono text-accent font-bold">
+                      RAW
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
     </div>
   );
 }

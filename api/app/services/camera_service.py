@@ -53,6 +53,7 @@ _CMD_AUTOFOCUS = "autofocus"
 _CMD_SHUTDOWN = "shutdown"
 
 _COMMAND_TIMEOUT_SECONDS = 30.0
+_CONNECT_TIMEOUT_SECONDS = 120.0
 _SHUTDOWN_TIMEOUT_SECONDS = 3.0
 
 
@@ -84,6 +85,7 @@ class CameraService:
         self._stop_live_view = Event()
         self._live_view_active = False
         self._live_view_generation = 0
+        self._stream_source = "hdmi"  # "hdmi" | "ptp"
 
         # Worker thread + command queue.
         self._cmd_queue: Queue = Queue()
@@ -164,8 +166,8 @@ class CameraService:
                 return
 
     def _maybe_produce_frame(self):
-        """Produce one live-view frame if streaming is requested."""
-        if not self.live_view_active or self._stop_live_view.is_set():
+        """Produce one live-view frame if streaming is requested and source is PTP."""
+        if self._stream_source != "ptp" or not self.live_view_active or self._stop_live_view.is_set():
             return
 
         camera, _context = self._snapshot_camera()
@@ -209,8 +211,8 @@ class CameraService:
             return None
         raise ValueError(f"Unknown command tag: {tag}")
 
-    def _result(self, future: Future):
-        return future.result(timeout=_COMMAND_TIMEOUT_SECONDS)
+    def _result(self, future: Future, timeout: float | None = None):
+        return future.result(timeout=timeout or _COMMAND_TIMEOUT_SECONDS)
 
     def _fail_queued_commands(self) -> None:
         while True:
@@ -466,7 +468,7 @@ class CameraService:
 
         self._ensure_worker()
         try:
-            return self._result(self._submit(_CMD_CONNECT))
+            return self._result(self._submit(_CMD_CONNECT), _CONNECT_TIMEOUT_SECONDS)
         except Exception as e:
             logger.error(f"Connect failed: {e}")
             return {
@@ -608,7 +610,7 @@ class CameraService:
         }
 
     def troubleshoot(self) -> Dict[str, Any]:
-        """Kill USB-grabbing processes, reset USB, and detect camera.
+        """Kill USB-grabbing processes, reset USB, and reconnect the camera.
 
         Platform-aware: kills macOS PTP daemons or Linux gvfs processes,
         and uses ioctl USB reset as fallback on Linux.
@@ -633,17 +635,29 @@ class CameraService:
         killed = self.kill_ptp_processes()
         time.sleep(0.3)
 
-        # Reset USB device
-        usb_reset = self.reset_usb()
-        time.sleep(0.5)
+        # Do NOT reset the USB device: gphoto2 --reset / USBDEVFS_RESET wedge
+        # the Sony A7R III PTP session so the camera stops answering commands
+        # until it is power-cycled.  A clean disconnect + reconnect is the safe
+        # recovery path for this camera.
+        usb_reset = False
 
-        # Kill again after reset (daemons may respawn)
+        # Kill again (daemons may respawn)
         killed2 = self.kill_ptp_processes()
         killed.extend(killed2)
         time.sleep(0.3)
 
         camera_info = self.detect_camera_info()
         detected = camera_info.get("detected", False)
+
+        connected = False
+        reconnect_msg = "Reconnect skipped."
+        if detected:
+            connect_result = self.connect()
+            connected = connect_result.get("success", False)
+            if connected:
+                reconnect_msg = "Camera reconnected."
+            else:
+                reconnect_msg = f"Reconnect failed: {connect_result.get('message', 'unknown')}"
 
         parts = []
         parts.append(f"Platform: {os_name}.")
@@ -656,6 +670,7 @@ class CameraService:
             parts.append(f"Camera detected: {camera_info.get('model', 'unknown')} on {camera_info.get('port', 'unknown')}.")
         else:
             parts.append("Camera not detected after troubleshooting.")
+        parts.append(reconnect_msg)
 
         return {
             "success": True,
@@ -665,6 +680,7 @@ class CameraService:
             "camera_detected": detected,
             "camera_model": camera_info.get("model"),
             "camera_port": camera_info.get("port"),
+            "connected": connected,
             "message": " ".join(parts),
         }
 
@@ -1351,6 +1367,20 @@ class CameraService:
             self._live_view_generation += 1
             self._live_view_active = False
             self._frame_cond.notify_all()
+
+    @property
+    def stream_source(self) -> str:
+        """Active live view stream source ('hdmi' | 'ptp')."""
+        return self._stream_source
+
+    def set_stream_source(self, source: str) -> str:
+        """Switch active live view stream source ('hdmi' | 'ptp')."""
+        source_normalized = source.lower().strip()
+        if source_normalized not in ("hdmi", "ptp"):
+            raise ValueError(f"Invalid stream source: {source}. Must be 'hdmi' or 'ptp'.")
+        self._stream_source = source_normalized
+        logger.info(f"Live view stream source set to: {self._stream_source}")
+        return self._stream_source
 
     def request_operation_cancel(self) -> None:
         with self._operation_submit_lock:

@@ -194,6 +194,44 @@ def test_capture_submission_and_cancel_do_not_lose_cancel_request(
     assert camera_service._operation_cancel.is_set()
 
 
+def test_troubleshoot_reconnects_without_destructive_usb_reset(
+    camera_service: CameraService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(camera_module.time, "sleep", lambda *_args: None)
+    monkeypatch.setattr(camera_service, "kill_ptp_processes", lambda: [])
+    reset_calls: list[int] = []
+    monkeypatch.setattr(
+        camera_service,
+        "reset_usb",
+        lambda: reset_calls.append(1) or True,
+    )
+    monkeypatch.setattr(
+        camera_service,
+        "detect_camera_info",
+        lambda: {"detected": True, "model": "fake", "port": "usb:001,001"},
+    )
+    connect_calls: list[int] = []
+    monkeypatch.setattr(
+        camera_service,
+        "connect",
+        lambda: connect_calls.append(1)
+        or {
+            "success": True,
+            "connected": True,
+            "model": "fake",
+            "message": "Connected to fake",
+        },
+    )
+
+    result = camera_service.troubleshoot()
+
+    assert result["connected"] is True
+    assert "reconnected" in result["message"].lower()
+    assert connect_calls == [1]
+    assert reset_calls == []
+
+
 def test_new_live_view_owner_replaces_old_without_stale_frame(
     camera_service: CameraService,
     monkeypatch: pytest.MonkeyPatch,

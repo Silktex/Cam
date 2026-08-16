@@ -1,6 +1,7 @@
 import type { Config } from 'tailwindcss'
 
 const config: Config = {
+  darkMode: 'class',
   content: [
     './pages/**/*.{js,ts,jsx,tsx,mdx}',
     './components/**/*.{js,ts,jsx,tsx,mdx}',
@@ -9,7 +10,21 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // 2026 "Transformative Teal" palette
+        chassis: '#121417',
+        surface: '#1A1D23',
+        'surface-raised': '#262B34',
+        'border-subtle': 'rgba(255, 255, 255, 0.08)',
+        'border-strong': 'rgba(255, 255, 255, 0.16)',
+        accent: '#E58E26',
+        'accent-muted': 'rgba(229, 142, 38, 0.15)',
+        'accent-glow': 'rgba(229, 142, 38, 0.15)',
+        'status-ok': '#10B981',
+        'status-active': '#10B981',
+        'status-warn': '#F59E0B',
+        'status-warning': '#F59E0B',
+        'status-err': '#EF4444',
+        'status-error': '#EF4444',
+        // Backward-compatible teal palette
         teal: {
           50: '#F0FDFA',
           100: '#CCFBF1',
@@ -22,20 +37,22 @@ const config: Config = {
           800: '#115E59',
           900: '#134E4A',
         },
-        // Cloud Dancer (Pantone 2026)
-        cloud: '#FAFAF8',
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+        mono: ['JetBrains Mono', 'monospace'],
+        sans: ['Plus Jakarta Sans', 'sans-serif'],
+        display: ['Space Grotesk', 'sans-serif'],
       },
       borderRadius: {
-        'organic': '20px',
+        'sm': '4px',
+        'md': '6px',
+        'lg': '10px',
         '2xl': '16px',
         '3xl': '20px',
+        'full': '9999px',
       },
       boxShadow: {
-        'soft': '0 2px 8px -2px rgba(0, 0, 0, 0.08)',
-        'teal-glow': '0 4px 14px -3px rgba(13, 115, 119, 0.25)',
+        'accent-glow': '0 4px 20px -3px rgba(229, 142, 38, 0.25)',
       },
     },
   },

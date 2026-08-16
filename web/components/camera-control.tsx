@@ -55,10 +55,10 @@ export function CameraControl() {
         <button
           onClick={() => isConnected ? disconnectMutation.mutate() : connectMutation.mutate()}
           disabled={isPending}
-          className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-medium transition-colors disabled:opacity-50 ${
+          className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-medium transition-colors disabled:opacity-50 text-white ${
             isConnected
-              ? 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-              : 'bg-teal-600 text-white hover:bg-teal-700 shadow-teal-glow'
+              ? 'bg-emerald-600 hover:bg-emerald-700 shadow-sm'
+              : 'bg-red-600 hover:bg-red-700 shadow-sm'
           }`}
         >
           {(connectMutation.isPending || disconnectMutation.isPending) ? (

@@ -106,6 +106,7 @@ export default function ValidatePage() {
           options={[
             { value: 'albedo', label: 'Albedo Range' },
             { value: 'metallic', label: 'Metallic Range' },
+            { value: 'both', label: 'Both' },
           ]}
           onChange={setMode}
         />

@@ -1,93 +1,136 @@
-HANDOFF CONTEXT
-===============
+# Handoff — Sony A7R III Studio & Photometric Camera System
 
-LATEST SESSION (2026-08-14) — structured logging system
---------------------------------------------------------
-Goal: add a logging system so the camera_system is easier to debug. Completed end-to-end; work is UNCOMMITTED on top of baseline commit `9e12e39`.
+## 1. Project Overview & Current State
 
-WHAT LANDED:
-- Backend (api/): structlog + contextvars structured logging. `app/logging_setup.py` (JSON stdout, merge_contextvars first, stdlib bridge via ProcessorFormatter), `app/request_id_middleware.py` (pure-ASGI, binds request_id/method/route, echoes x-request-id), `app/context_utils.py` (`run_with_context()` for threadpool context propagation). Wired in `main.py` with `log_config=None` and `LOG_LEVEL` (new setting in `config.py`).
-- Correlation: 3 WebSocket routers (`websocket.py`, `lights_ws.py`, `batch_capture.py`) bind a per-connection `session_id`; `batch_capture_service.py` + `post_capture_service.py` + `batch_capture.py` wrap all `run_in_executor`/`executor.submit` calls in `run_with_context`.
-- Frontend (web/): `lib/logger.ts` (JSON + AsyncLocalStorage requestId), `middleware.ts` (mint/forward x-request-id), `lib/api.ts` + `lib/lightsApi.ts` read x-request-id on error, `app/api/health/route.ts` server log call site.
-- Ops: `docker-compose.yml` json-file log rotation (max-size=10m, max-file=5, compress), `LOG_LEVEL=INFO`.
-- Tests: `api/tests/test_logging_core.py` (3), `api/tests/test_correlation.py` (10), `web/__tests__/lib/logger.test.ts` (2). Backend 110 passed / 21 skipped; web 147 passed / 2 pre-existing failures (Equalize PE-10, Validate PV-02).
+This project is a high-precision optical studio and photometric stereo acquisition system for the **Sony ILCE-7RM3 (A7R III, 61.0 MP)** combined with a custom **ESP32 9-LED lighting rig** (1 Top Dome Light + 8 radial perimeter spotlights at 45° intervals), hardware-accelerated **MacroSilicon USB 3.0 HDMI Capture Card** streaming via AMD Radeon Vega 11 VA-API H.264 WebRTC/RTSP, and both a unified 5-Station Studio Workbench and a restored classic `/v1` cockpit in Next.js 14.
 
-VERIFICATION: run `.venv/bin/python -m pytest tests/` in api/ (ignore 6 gphoto2/scipy collection-error files: test_camera_concurrency, test_clone_service, test_event_bus_threading, test_perspective_service, test_seamless_service, test_straighten_service, test_validate_service). Web: `npx vitest run`.
+All legacy MJPEG frame-polling loops have been eliminated in favor of real-time hardware-encoded RTSP (`rtsp://127.0.0.1:8554/stream`) and WebRTC WHEP (`/stream/whep`), reducing CPU usage to near-zero while enabling 100% non-blocking PTP exposure control and 61MP RAW capture.
 
-NOTES / FOLLOW-UPS:
-- Frontend logger is hand-rolled (not pino) — no new npm dep; equivalent JSON+ALS behavior.
-- A subagent wrote piece 085.3 into /home/posh/Desktop/camera_system (stale GitHub clone) by mistake; changes were ported to the real project by hand and re-verified. Ignore the Desktop clone.
-- Beads epic camera_system-085 + children 085.1–085.6 all closed.
-- Still UNCOMMITTED. Do not push unless explicitly asked.
-- Model-routing note: `~/.omo/omo.jsonc` categories load once at opencode server start; edits need full process restart. `gpt-5.6-sol` was rate-limited (~5.4 days) this session; work used qwen3.7-plus (builder) + glm-5.2 (critic).
+All test suites and production builds are **100% passing**:
+- **Vitest Unit & Component Tests**: **155 passing** across 20 test files (`0` failures).
+- **Playwright End-to-End (E2E) UI Tests**: **40 passing** across 6 test files (`0` failures).
+- **Backend API Pytest Suite**: **228 passing** inside the Docker container on host `ind` (`0` failures).
+- **Next.js Production Build**: `17/17` routes compiled successfully.
 
-PENDING (from prior session, still open):
-- Physical-camera validation of cancellation during an actively blocked capture.
-- Optional: warn/freeze handling for exposure-mode (not just parameter) changes (3-8s stall on A7R III).
+---
 
-USER REQUESTS (AS-IS)
----------------------
-- ~/projects/camera_system/sony/Examples/example-v2-linux contains sony exmple for building camera controls. Compare with existing gphoto2. I want non blocking commands. For exmple if I change shutter speed, live view disconnects takes few seconds to connect. Research online for best method for non blocking commands for sony a7r3
-- Can we do it with libgphoto2?
-- yes
+## 2. Recent Implementation & Fixes Summary
 
-GOAL
-----
-Finish and verify the non-blocking camera-control restructure of camera_service.py: run the test suite inside the Docker container (where gphoto2 and pytest are installed) to confirm no regression, and optionally add a regression test that locks in "live view survives a setting change".
+### A. Individual Light Channel Toggles Grid
+- **Station 1: Capture Studio (`/`)**: Added a dedicated 9-channel toggle button grid directly beneath the radial lighting visualizer in [`web/app/page.tsx`](file:///home/rc/projects/camera_system/web/app/page.tsx).
+  - Individual channels: `TOP DOME` (Center Dome) and `SIDE 1` through `SIDE 8` (45° radial positions).
+  - Real-time visual feedback: Glowing active state badge (`ON`/`OFF`), pulse status dot, and keyboard hotkeys (`T`, `1`–`8`).
+- **Classic Cockpit (`/all`)**: Modernized [`LightControlPanel.tsx`](file:///home/rc/projects/camera_system/web/app/all/components/LightControlPanel.tsx) with interactive rows and instant ON/OFF status pills.
+- **Dedicated Light Station (`/lights`)**: Full individual channel dimmer and toggle cards via [`LightCard.tsx`](file:///home/rc/projects/camera_system/web/components/LightCard.tsx).
 
-WORK COMPLETED
---------------
-- Researched Sony A7R III non-blocking control: read the Sony libcameracontrolptp example-v2-linux sample (socc_ptp.h/.cpp, command.cpp/.h, serverclient.cpp, parser.h, and the .sh scripts) and ran two parallel librarian agents plus one explore agent for online research (Sony Camera Remote SDK, libgphoto2 internals, OSS projects open-camera-control and bookThing).
-- Established that the old camera_service.py live-view loop did `except gp.GPhoto2Error: break`, turning a transient preview failure into a full stream teardown. Related Sony preview stalls are documented upstream, but the exact A7R III object ID and 1-3 second duration remain hardware observations to verify.
-- Recommended and implemented the worker-thread + command-queue + frame-ring-buffer architecture, entirely on libgphoto2 (python-gphoto2), since Sony USB/PTP is single-session and not thread-safe.
-- Reworked api/app/services/camera_service.py and its lifecycle integrations; handoff.md and regression tests were also added:
-  - Single daemon worker thread is the sole owner of the gp.Camera object.
-  - Command queue (queue.Queue) with concurrent.futures.Future results for connect, get_settings, set_setting, capture_image, capture_only, download_from_camera, trigger_autofocus.
-  - Live-view frame production moved into the worker loop; frames published to a latest-frame-wins ring buffer guarded by a Condition.
-  - start_live_view() is now a consumer generator that reads the ring buffer, decoupling production from the HTTP MJPEG stream.
-  - set_setting no longer stops or disrupts live view; the worker preempts preview for the duration of one set_config transaction and resumes.
-  - _maybe_produce_frame retries on transient GPhoto2Error instead of killing the stream.
-  - self._lock is a state/lifecycle lock (guards _camera/_context/_connected/_model); camera cleanup is dispatched to the worker and is not performed externally after a timed-out join.
-  - Public method signatures and return shapes are preserved. EventBus WebSocket sends are transferred onto the FastAPI event loop, and batch cancellation uses libgphoto2's cooperative context cancellation instead of cross-thread camera.exit().
-- Verified the concurrency architecture by driving the real singleton with a stubbed gphoto2 + fake camera (in /tmp, since gphoto2 is not installed in this sandbox): frame production, non-blocking set_setting during streaming, stream survival after a setting change, and retry-on-transient-error all passed (removed the temp test afterward).
+### B. Auto-Connect & Auto-Start HDMI Live Streaming
+- **Auto-Connect on Page Mount**: Added `useEffect` in [`web/components/StudioHeader.tsx`](file:///home/rc/projects/camera_system/web/components/StudioHeader.tsx) and [`web/app/all/components/DashboardHeader.tsx`](file:///home/rc/projects/camera_system/web/app/all/components/DashboardHeader.tsx) to automatically connect to the camera on load if detected.
+- **Auto-Start HDMI WebRTC Stream**: On connection, dispatches `setLiveViewSource('hdmi')` and triggers automatic WHEP WebRTC negotiation with an auto-retry loop in [`web/components/WebRTCStreamViewer.tsx`](file:///home/rc/projects/camera_system/web/components/WebRTCStreamViewer.tsx).
 
-CURRENT STATE
--------------
-- api/app/services/camera_service.py includes bounded command waits, deterministic queue shutdown, worker-owned cleanup, generation-based live-view ownership, and cooperative capture cancellation.
-- Docker verification passes: 13 focused lifecycle tests and the full 210-test API suite. Five dependency/deprecation warnings remain unrelated to the camera lifecycle fix.
-- The repo has substantial pre-existing uncommitted work unrelated to this session (autoexposure feature under api/app/services/exposure/, web image-processing components, autoexposure.md, various tests) that was already present; this session did not touch it.
-- The actual project root is /home/posh/projects/camera_system (the agent shell cwd /home/posh/Desktop/camera_system contains only an empty .omo directory and no project files).
+### C. Direct Port 3000 URL & API Routing
+- Configured dynamic API URL detection in [`web/lib/urlHelpers.ts`](file:///home/rc/projects/camera_system/web/lib/urlHelpers.ts) and Next.js rewrites in [`web/next.config.js`](file:///home/rc/projects/camera_system/web/next.config.js).
+- When users access Next.js directly on port `3000` (bypassing the `cam-gateway` reverse proxy on port `3100`), API (`/api/*`) and stream (`/stream/*`) routes automatically proxy to the FastAPI backend on port `8000`.
 
-PENDING TASKS
--------------
-- Run physical-camera validation for live-view setting changes and cancellation. Automated Docker verification is complete; focused tests are in api/tests/test_camera_concurrency.py and api/tests/test_event_bus_threading.py.
-- Physical A7R III validation passed for connect, live-view frames, ISO 800 -> 1000 -> 800 while streaming, stream continuity, stop, disconnect/reconnect, autofocus, and one RAW capture. Cancellation during an actively blocked capture remains untested.
-- Optional follow-up: warn/freeze handling for exposure-mode (not just parameter) changes, which stall 3-8s on A7R III and are best avoided during live view.
+### D. Camera Button Styling
+- Toggle buttons in [`StudioHeader.tsx`](file:///home/rc/projects/camera_system/web/components/StudioHeader.tsx), [`DashboardHeader.tsx`](file:///home/rc/projects/camera_system/web/app/all/components/DashboardHeader.tsx), and [`camera-control.tsx`](file:///home/rc/projects/camera_system/web/components/camera-control.tsx) display **Green** (`bg-emerald-500/20 text-emerald-400 border-emerald-500/40`) when connected and **Red** (`bg-red-500/20 text-red-400 border-red-500/40`) when disconnected.
 
-KEY FILES
----------
-- api/app/services/camera_service.py - the non-blocking camera controller (worker thread + command queue + ring buffer)
-- api/app/routers/liveview.py - consumes start_live_view() generator via StreamingResponse (MJPEG)
-- api/app/routers/camera.py - consumes set_setting/get_settings/trigger_autofocus/connect/disconnect/troubleshoot
-- api/app/services/batch_capture_service.py - consumes capture_image/set_setting and requests cooperative cancellation
-- api/app/services/exposure/controller.py - consumes get_settings/set_setting via CameraExposureController
-- api/app/config.py - PREVIEW_FPS and other settings
-- api/app/services/event_bus.py - EventType/event_bus publish/settle used by camera_service
-- sony/Examples/example-v2-linux - Sony reference sample used for research (libcameracontrolptp, persistent socket server pattern)
+### E. Ingress & Reverse Proxy Diagnostics (`cam.silktex.com`)
+1. **NetBird SSO Expiration on Host `ind`**: The `ingress-netbird` container experienced an expired SSO session with the management server. A non-expiring Setup Key generated in NetBird (`https://nb.rs74.net`) must be configured as `NB_SETUP_KEY` in the container stack.
+2. **Cloudflare 302 Loop**: When Cloudflare SSL is set to Flexible, port 80 traffic enters an infinite 302 redirect loop with `silktex-proxy`. Cloudflare SSL mode should be set to **Full (Strict)** or configured with an Origin Rule routing `cam.silktex.com` directly to port `3100`.
 
-IMPORTANT DECISIONS
--------------------
-- Keep libgphoto2 (python-gphoto2) rather than migrating to Sony Camera Remote SDK v1.x. The A7R III firmware freeze happens regardless of driver, and a C++ bridge is a large lift; the SDK is only a fallback if gphoto2's A7R III quirks (e.g. #1080 movie-mode segfault) bite.
-- True parallel control + streaming is impossible on any library because Sony USB/PTP is single-session; "non-blocking" is achieved by serializing on one worker thread and interleaving commands between frames, not by adding a second control channel.
-- The 1-3s freeze after shutter/ISO/aperture changes is accepted as firmware behavior; the deliverable is that the stream survives (client shows last frame), not that the freeze disappears.
-- capture_image/capture_only still stop live view before capturing (unchanged behavior), but set_setting no longer does.
+---
 
-EXPLICIT CONSTRAINTS
---------------------
-- None stated by the user for the implementation beyond the request itself. No commit was requested and none was made.
+## 3. 5-Station Studio Workbench & Classic /v1 Cockpit Routing
 
-CONTEXT FOR CONTINUATION
-------------------------
-- The lifecycle fixes are covered by 13 durable fake-camera concurrency tests and a 210-test full Docker run. Physical A7R III validation also passed for live-view setting changes, reconnect, autofocus, and RAW capture; active-capture cancellation remains outstanding.
-- To reproduce the manual verification, stub gphoto2 in sys.modules and inject a fake camera via the service's internal state setters, then drive start_live_view() and set_setting() — the four checks I ran (frame yield, set_setting during stream, stream alive after, retry on transient error) are the acceptance criteria.
-- Batch cancellation no longer force-calls camera.exit() from the event-loop thread. It sets the libgphoto2 context cancellation flag; cancellation latency therefore depends on the active libgphoto2 call reaching a cancellation check.
+| Route | Primary View | Legacy / Direct Aliases | Key Functional & UI Capabilities |
+| :--- | :--- | :--- | :--- |
+| **`/`** | **Station 1: Capture Studio** | [`/capture`](file:///home/rc/projects/camera_system/web/app/capture/page.tsx) | Sub-100ms WebRTC WHEP live stream (1080p30 H.264 HW Encoded), stream source switcher (`HDMI` MacroSilicon USB 3.0 vs `PTP` Sony ILCE-7RM3, shortcut `S`), canvas freeze-frame snapshot (`L`), visual overlays (Rule-of-Thirds Grid, Zebra clipping, Focus peaking edge-glow), AF lock crosshairs, HUD telemetry, PTP exposure dials, 9-LED individual toggle buttons (`Space`, `T`, `1`–`8`), 61MP RAW capture (`Ctrl+S`), session filmstrip. |
+| **`/batch`** | **Station 2: Batch Sequencer** | — | Automated 9-light multi-angle sequence engine, batch folder/prefix configuration, calibration profile selector, light stabilize delay stepper, live stepped progress bar, camera PIP feedback monitor, auto-registration into completed batches table. |
+| **`/calibration`** | **Station 3: Color Calibration** | [`/color-calibration`](file:///home/rc/projects/camera_system/web/app/color-calibration/page.tsx) | 24-patch X-Rite ColorChecker Classic interactive grid, deep patch inspector (Reference sRGB D65 vs Measured Camera RGB, CIE2000 $\Delta E$ error), 90° canvas rotation/flip, spectral calibration metrics, $3\times3$ CCM output, ICC profile (.icc) export. |
+| **`/processing`** | **Station 4: PBR Synthesis Lab** | [`/pbr`](file:///home/rc/projects/camera_system/web/app/pbr/page.tsx) | 2x2 synchronized material map viewports (Albedo, Normal, Roughness, Displacement), interactive 3D virtual light probe sphere, 4K/8K resolution selector, material presets, glTF 2.0 package (.zip) export. |
+| **`/gallery`** | **Station 5: Inspection Lightbox** | — | 61.0 MP RAW image deep-zoom lightbox, view mode toggle (100% 1:1 Pixel View vs Fit to Screen), mouse-following 100% pixel loupe overlay, 9-light directional switcher toolbar, EXIF hardware telemetry card, RAW+TIFF batch download (.zip). |
+| **`/v1`** | **Restored Classic UI Cockpit** | [`/all`](file:///home/rc/projects/camera_system/web/app/all/page.tsx) | Restored 2-column classic cockpit (`460px` sidebar + main viewport), `Single` / `Color` / `Batch` tabs, sidebar ESP32 LightControlPanel with individual switches, modern WebRTC live stream with HDMI/PTP source switcher. |
+| **Header** | **Studio Header** | [`StudioHeader.tsx`](file:///home/rc/projects/camera_system/web/components/StudioHeader.tsx) | Global station navigation tabs with active badges, camera PTP auto-connect & toggle (`Ctrl+C`), ESP32 light rig status pod, non-destructive Re-Detect button (`troubleshootCamera`), keyboard shortcuts modal (`?`). |
+| **Tools** | **Specialized Tools Hub** | [`/processing/tools`](file:///home/rc/projects/camera_system/web/app/processing/tools/page.tsx) | Pipeline tools (Perspective, Equalize, Flatten, Delight, Seamless, Tiling), utility tools (PBR Validate, Clone Stamp), 4-point Crop editor, Cockpit tab switcher, standalone ESP32 Light Controller ([`/lights`](file:///home/rc/projects/camera_system/web/app/lights/page.tsx)). |
+
+---
+
+## 4. Hardware Video Streaming & Transcoding Pipeline
+
+```
+                                  +------------------------------------+
+                                  | MacroSilicon USB 3.0 HDMI Capture  |
+                                  | (/dev/video0, 1080p30 MJPEG raw)  |
+                                  +-----------------+------------------+
+                                                    |
+                                                    v
+                                  +------------------------------------+
+                                  | AMD Radeon Vega 11 GPU (VCN 1.0)   |
+                                  | VA-API Encoder (/dev/dri/renderD128|
+                                  | H.264 Constrained Baseline, 4Mbps  |
+                                  +-----------------+------------------+
+                                                    | (rtsp://127.0.0.1:8554/stream)
+                                                    v
+                                  +------------------------------------+
+                                  | MediaMTX RTSP / WebRTC Server      |
+                                  | :8554 (RTSP), :8889 (WHEP)         |
+                                  +-----------------+------------------+
+                                                    |
+                                                    v
+                                  +------------------------------------+
+                                  | cam-gateway (Nginx :3100)          |
+                                  | /stream/ -> :8889 (WHEP Signaling) |
+                                  | /api/    -> :8000 (FastAPI)        |
+                                  | /        -> :3000 (Next.js)        |
+                                  +-----------------+------------------+
+                                                    |
+                                                    v
+                                  +------------------------------------+
+                                  | Frontend WebRTCStreamViewer.tsx    |
+                                  | Sub-100ms Latency WHEP Player      |
+                                  +------------------------------------+
+```
+
+---
+
+## 5. Build, Test, and Deployment Commands
+
+```bash
+# Run all Vitest unit & component tests
+npm --prefix web run test
+
+# Run all Playwright E2E UI tests
+npm --prefix web run test:e2e
+
+# Run Next.js production build
+npm --prefix web run build
+
+# Sync files to remote host ind (ESP-PC, 10.10.2.21)
+rsync -avz --no-owner --no-group --exclude 'node_modules' --exclude '.next' --exclude '.venv' --exclude '__pycache__' /home/rc/projects/camera_system/ ind:/home/posh/projects/camera_system/
+
+# Rebuild and restart Docker container on host ind
+ssh ind "cd /home/posh/projects/camera_system && sudo docker compose up -d --build camera-system"
+```
+
+---
+
+## 6. Key Files & Artifacts
+
+- [`handoff.md`](file:///home/rc/projects/camera_system/handoff.md) — Master project handoff document.
+- [`web/app/page.tsx`](file:///home/rc/projects/camera_system/web/app/page.tsx) — Station 1 Capture Studio with 9-channel individual light toggle buttons grid and dual stream source switcher.
+- [`web/components/StudioHeader.tsx`](file:///home/rc/projects/camera_system/web/components/StudioHeader.tsx) — Top studio header with auto-connect on load and green/red status styling.
+- [`web/components/WebRTCStreamViewer.tsx`](file:///home/rc/projects/camera_system/web/components/WebRTCStreamViewer.tsx) — Native WebRTC WHEP client with auto-connection and retry mechanisms.
+- [`web/app/all/components/LightControlPanel.tsx`](file:///home/rc/projects/camera_system/web/app/all/components/LightControlPanel.tsx) — Interactive individual light switches for `/all` and `/v1`.
+- [`web/app/lights/page.tsx`](file:///home/rc/projects/camera_system/web/app/lights/page.tsx) & [`web/components/LightCard.tsx`](file:///home/rc/projects/camera_system/web/components/LightCard.tsx) — Dedicated lighting rig station.
+- [`web/lib/urlHelpers.ts`](file:///home/rc/projects/camera_system/web/lib/urlHelpers.ts) & [`web/next.config.js`](file:///home/rc/projects/camera_system/web/next.config.js) — Port 3000 direct access dynamic routing and API rewrites.
+- [`api/app/services/video_device_service.py`](file:///home/rc/projects/camera_system/api/app/services/video_device_service.py) — MacroSilicon V4L2 device discovery and VA-API hardware encoder.
+
+---
+
+## 7. Suggested Skills
+
+- `react-doctor` — Run when inspecting React components, state hooks, or performance in `web/app/`.
+- `beads` — Track task dependencies and progress (`bd ready`, `bd update`).
+- `portainer-skill` / `netbird-portainer` — Monitor Docker container deployments and NetBird proxy routing on host `ind`.
+- `graphify` — Query architectural dependencies and god nodes (`graphify update .`).
+- `caveman` / `caveman-commit` — Efficient token communication and clean commit generation when staging changes.

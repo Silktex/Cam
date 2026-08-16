@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { getWebSocketBaseUrl } from '@/lib/urlHelpers';
 
 interface LightState {
   id: number;
@@ -39,7 +40,7 @@ export function useLightsWebSocket() {
   const pingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const connect = useCallback(() => {
-    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000';
+    const wsUrl = getWebSocketBaseUrl();
     
     try {
       wsRef.current = new WebSocket(`${wsUrl}/ws/lights`);

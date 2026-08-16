@@ -1,47 +1,47 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
 @import "tailwindcss";
 
 :root {
-  --background: #FAFAF8;
-  --foreground: #1E293B;
-  --grain-opacity: 0.03;
+  --background: #121417;
+  --foreground: #F3F4F6;
 }
 
 .dark {
-  --background: #0F172A;
-  --foreground: #F1F5F9;
-  --grain-opacity: 0.04;
+  --background: #121417;
+  --foreground: #F3F4F6;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #121417;
+  color: #F3F4F6;
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
 }
 
-/* Subtle grain texture for human feel */
-body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
-  opacity: var(--grain-opacity);
-  pointer-events: none;
-  z-index: 9999;
+/* Custom Studio Overlays */
+.zebra-pattern {
+  background: repeating-linear-gradient(45deg, rgba(229, 142, 38, 0.4), rgba(229, 142, 38, 0.4) 10px, transparent 10px, transparent 20px);
+}
+
+.peaking-glow {
+  box-shadow: inset 0 0 15px rgba(16, 185, 129, 0.6);
+  border: 1px solid rgba(16, 185, 129, 0.8) !important;
 }
 
 /* Focus ring style */
 *:focus-visible {
-  outline: 2px solid #14B8A6;
+  outline: 2px solid #E58E26;
   outline-offset: 2px;
 }
 
-/* Organic transitions */
-button, a, input {
-  transition: all 0.2s ease;
+/* Smooth transitions */
+button, a, input, select {
+  transition: all 0.15s ease;
 }
 
-/* Range slider modernization */
+/* Range slider styling */
 input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
@@ -57,16 +57,16 @@ input[type="range"]::-webkit-slider-track {
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 18px;
-  height: 18px;
-  background: #14B8A6;
+  width: 16px;
+  height: 16px;
+  background: #E58E26;
   border-radius: 50%;
   cursor: pointer;
-  margin-top: -6px;
-  box-shadow: 0 2px 8px rgba(20, 184, 166, 0.3);
+  margin-top: -5px;
+  box-shadow: 0 2px 8px rgba(229, 142, 38, 0.4);
 }
 
 input[type="range"]::-webkit-slider-thumb:hover {
-  transform: scale(1.1);
-  background: #2DD4BF;
+  transform: scale(1.15);
+  background: #F59E0B;
 }

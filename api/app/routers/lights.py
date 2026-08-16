@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+@router.get("", response_model=LightsResponse, include_in_schema=False)
 @router.get("/", response_model=LightsResponse)
 async def get_all_lights():
     """Get the state of all lights."""
