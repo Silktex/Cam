@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Video, VideoOff, RefreshCw, Layers, ShieldCheck, Eye, EyeOff, Zap, Grid, Focus } from 'lucide-react';
-import { getWhepStreamUrl, setLiveViewSource, type LiveViewStatus } from '@/lib/api';
+import { getWhepStreamUrl, getLiveViewUrl, setLiveViewSource, type LiveViewStatus } from '@/lib/api';
 
 export interface WebRTCStreamViewerProps {
   streamSource?: 'hdmi' | 'ptp';
@@ -133,6 +133,10 @@ export function WebRTCStreamViewer({
 
   // Initialize stream on mount & active source change
   useEffect(() => {
+    if (activeSource === 'ptp') {
+      // PTP mode renders the MJPEG endpoint directly - no WebRTC involved
+      return;
+    }
     connectWhep();
     return () => {
       if (retryTimerRef.current) {
@@ -205,8 +209,19 @@ export function WebRTCStreamViewer({
       {/* Hidden Offscreen Canvas for Snapshot / Processing */}
       <canvas ref={canvasRef} className="hidden" />
 
+      {/* PTP Direct: MJPEG stream rendered natively */}
+      {!isFrozen && activeSource === 'ptp' && (
+        <img
+          data-testid="ptp-mjpeg-feed"
+          src={`${getLiveViewUrl()}?t=${Date.now()}`}
+          alt="PTP Live View"
+          className="w-full h-full object-cover"
+          style={brightnessStyle}
+        />
+      )}
+
       {/* Primary Video Element (WebRTC HW Encoded Stream) */}
-      {!isFrozen && (
+      {!isFrozen && activeSource !== 'ptp' && (
         <video
           ref={videoRef}
           data-testid="live-video-element"
@@ -220,15 +235,16 @@ export function WebRTCStreamViewer({
         />
       )}
 
-      {/* Fallback / Mock Feed Image */}
-      {(!isFrozen && connectionState !== 'connected') && (
-        <img
+      {/* No-signal placeholder (WebRTC unreachable) */}
+      {(!isFrozen && activeSource !== 'ptp' && connectionState !== 'connected') && (
+        <div
           data-testid="fallback-live-feed"
-          src="https://images.unsplash.com/photo-1579546929518-9e396f3cc809?auto=format&fit=crop&w=1200&q=80"
-          alt="Live View Optical Target"
-          className="w-full h-full object-cover opacity-90 brightness-95 contrast-105 transition-all duration-300"
-          style={brightnessStyle}
-        />
+          className="w-full h-full flex flex-col items-center justify-center bg-zinc-950 text-zinc-500 gap-2"
+        >
+          <VideoOff className="w-10 h-10 opacity-40" />
+          <span className="text-xs font-mono uppercase tracking-widest">No Signal</span>
+          <span className="text-[10px] font-mono opacity-60">WebRTC unreachable - check network or switch SRC to PTP</span>
+        </div>
       )}
 
       {/* Frozen Snapshot Image */}

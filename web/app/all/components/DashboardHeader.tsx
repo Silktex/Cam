@@ -13,7 +13,6 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import ShortcutsModal from './ShortcutsModal';
-import { setLiveViewSource } from '@/lib/api';
 
 export default function DashboardHeader() {
   const queryClient = useQueryClient();
@@ -34,7 +33,6 @@ export default function DashboardHeader() {
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['camera'] });
       queryClient.invalidateQueries({ queryKey: ['health'] });
-      setLiveViewSource('hdmi').catch(() => {});
       setMessage(res.data.message || 'Camera connected');
       setTimeout(() => setMessage(null), 4000);
     },
