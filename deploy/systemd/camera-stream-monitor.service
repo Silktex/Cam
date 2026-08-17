@@ -1,0 +1,15 @@
+[Unit]
+Description=Camera stream GPU/bitrate health sampler
+After=camera-stream-mediamtx.service camera-stream-publish.service
+
+[Service]
+Type=simple
+User=posh
+Group=posh
+Environment=STATE_FILE=/home/posh/projects/camera_system/scripts/stream_state.json
+ExecStart=/home/posh/projects/camera_system/scripts/monitor.sh --loop --interval 5
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

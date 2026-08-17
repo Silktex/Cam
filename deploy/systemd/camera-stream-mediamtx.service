@@ -1,0 +1,19 @@
+[Unit]
+Description=MediaMTX RTSP/RTMP/HLS media server for camera streaming
+Documentation=https://github.com/bluenviron/mediamtx
+# Listeners bind 0.0.0.0; loopback is always up, network.target suffices
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=posh
+Group=posh
+WorkingDirectory=/home/posh/projects/camera_system
+ExecStart=/usr/local/bin/mediamtx /home/posh/projects/camera_system/mediamtx.yml
+Restart=always
+RestartSec=2
+# mediamtx logs to stdout -> journald (logLevel: info in mediamtx.yml)
+
+[Install]
+WantedBy=multi-user.target

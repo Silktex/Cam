@@ -1,0 +1,27 @@
+[Unit]
+Description=Bandwidth-adaptive VA-API RTSP publish governor (camera stream)
+# Requires mediamtx: governor stops if mediamtx is stopped/removed, and both
+# restart together on boot. The video device is ordered-only (After=): /dev/video0
+# is NOT a tracked systemd device unit on this host, and a hard Requires would
+# fail boot when the camera enumerates late. Camera absence is handled by the
+# stream.sh retry loop (waits/backoff until /dev/video0 reappears).
+Requires=camera-stream-mediamtx.service
+After=camera-stream-mediamtx.service network.target dev-video0.device
+
+[Service]
+Type=simple
+User=posh
+Group=posh
+WorkingDirectory=/home/posh/projects/camera_system
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/posh/projects/camera_system/scripts/fps_governor.py \
+  --state-file /home/posh/projects/camera_system/scripts/stream_state.json \
+  --publish-cmd /home/posh/projects/camera_system/scripts/stream.sh \
+  --sample-interval 5
+Restart=always
+RestartSec=2
+TimeoutStopSec=20
+# Governor/stream.sh log to stdout/stderr -> journald
+
+[Install]
+WantedBy=multi-user.target
