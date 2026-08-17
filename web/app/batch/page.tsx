@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import StudioHeader from '@/components/StudioHeader';
-import { getLiveViewUrl, getBatches, type Batch } from '@/lib/api';
+import { getBatches, type Batch } from '@/lib/api';
 import { getWebSocketBaseUrl } from '@/lib/urlHelpers';
 import {
   Layers,
