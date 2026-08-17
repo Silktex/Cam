@@ -8,6 +8,7 @@ import logging
 from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 
 from app.services.camera_service import camera_service
 from app.services.video_device_service import video_device_service
@@ -124,14 +125,21 @@ async def stop_live_view():
 
 @router.get("/stream")
 async def live_view_stream():
-    """
-    Stream metadata endpoint. All clients connect to WebRTC WHEP (/stream/whep)
-    or RTSP (rtsp://127.0.0.1:8554/stream) for hardware-accelerated 1080p30.
-    """
-    return {
-        "status": "active",
-        "stream_type": "webrtc_h264",
-        "whep_url": "/stream/whep",
-        "rtsp_url": "rtsp://127.0.0.1:8554/stream",
-        "message": "Use WebRTC WHEP player (/stream/whep) for hardware-accelerated stream",
-    }
+    """MJPEG live view (PTP source) or stream metadata (HDMI/WebRTC source)."""
+    if camera_service.stream_source != "ptp":
+        return {
+            "status": "active",
+            "stream_type": "webrtc_h264",
+            "whep_url": "/stream/whep",
+            "rtsp_url": "rtsp://127.0.0.1:8554/stream",
+            "message": "Use WebRTC WHEP player (/stream/whep) for hardware-accelerated stream",
+        }
+
+    def mjpeg_frames():
+        for frame in camera_service.start_live_view():
+            yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
+
+    return StreamingResponse(
+        mjpeg_frames(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )
