@@ -328,11 +328,15 @@ class BatchCaptureService:
 
         except Exception as e:
             logger.exception(f"Batch capture failed: {e}")
-            # Ensure lights are off on error
+            # Ensure lights are off on error. The original capture failure
+            # must still propagate, so a lights-off failure here is logged,
+            # not raised.
             try:
                 await self._set_all_lights_off()
-            except:
-                pass
+            except Exception as lights_err:
+                logger.error(
+                    f"Failed to turn off lights after batch capture failure: {lights_err}"
+                )
             raise
 
         finally:

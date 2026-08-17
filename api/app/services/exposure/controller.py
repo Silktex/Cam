@@ -11,11 +11,14 @@ with an in-memory fake and no ``gphoto2`` present.
 """
 from __future__ import annotations
 
+import logging
 import re
 from typing import List, Optional, Sequence
 
 from app.services.exposure.config import AutoExposureConfig
 from app.services.exposure.types import ExposureSettings, ShutterOption
+
+logger = logging.getLogger(__name__)
 
 # Common libgphoto2/Sony config names, tried in order. The controller falls back
 # to parsing any widget whose choices look like shutter speeds / ISO / f-stops.
@@ -187,7 +190,8 @@ class CameraExposureController:
             return None
         try:
             self._camera.set_setting(name, value)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Camera rejected setting {name}={value!r}: {e}")
             return None
         return name
 
@@ -260,8 +264,9 @@ class CameraExposureController:
             if key in settings:
                 try:
                     self._camera.set_setting(key, 0)
-                except Exception:
-                    pass
+                except Exception as e:
+                    # Best-effort: not all bodies expose an auto-ISO toggle.
+                    logger.debug(f"Failed to disable auto-ISO via {key!r}: {e}")
 
         ok = True
         if exposure.camera_mode is not None:

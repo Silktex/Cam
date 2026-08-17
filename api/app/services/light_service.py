@@ -131,7 +131,11 @@ class LightControllerService:
                 # ESPHome brightness is 0-255
                 b_val = float(brightness_raw)
                 new_brightness = max(0, min(100, int(round(b_val * 100 / 255))))
-            except Exception:
+            except (TypeError, ValueError) as e:
+                logger.warning(
+                    f"Invalid brightness payload {brightness_raw!r} for light {idx}; "
+                    f"keeping previous brightness: {e}"
+                )
                 new_brightness = self.lights[idx].brightness
         else:
             new_brightness = self.lights[idx].brightness
@@ -179,8 +183,13 @@ class LightControllerService:
                                     payload = json.loads(data_str)
                                     if current_event == "state" or "state" in payload or "value" in payload:
                                         self._handle_sse_payload(payload)
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    # Keep-alive noise / partial frames must not
+                                    # kill the SSE listener loop.
+                                    logger.debug(
+                                        f"Ignoring malformed ESP32 SSE event "
+                                        f"({current_event!r}): {data_str[:100]!r}: {e}"
+                                    )
                             elif not text:
                                 current_event = ""
                     else:
@@ -352,7 +361,9 @@ class LightControllerService:
             for client in self._websocket_clients:
                 try:
                     await client.send_json(message)
-                except Exception:
+                except Exception as e:
+                    # Send failure is the dead-client detection signal itself.
+                    logger.debug(f"Dropping unresponsive light-state WebSocket client: {e}")
                     dead_clients.add(client)
 
             # Remove dead clients
@@ -373,7 +384,8 @@ class LightControllerService:
             for client in self._websocket_clients:
                 try:
                     await client.send_json(message)
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Dropping unresponsive light-health WebSocket client: {e}")
                     dead_clients.add(client)
 
             self._websocket_clients -= dead_clients

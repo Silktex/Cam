@@ -89,7 +89,9 @@ class StreamService:
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.get(url) as resp:
                     return resp.status == 200
-        except Exception:
+        except Exception as e:
+            # Unreachable mediamtx simply means HLS is off — not an error.
+            logger.debug(f"HLS availability probe failed for {url}: {e}")
             return False
 
     async def start(self) -> dict:

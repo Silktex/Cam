@@ -83,14 +83,14 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down Camera Control API...")
     try:
         camera_service.disconnect()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Camera disconnect during shutdown failed: {e}")
     
     # Shutdown: Disconnect light controller
     try:
         await light_service.disconnect()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Light controller disconnect during shutdown failed: {e}")
     finally:
         event_bus.detach_loop(application_loop)
 
