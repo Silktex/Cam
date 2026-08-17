@@ -20,6 +20,7 @@ services:
       - LOG_LEVEL=INFO
       - ESP32_HOST=10.10.2.20
       - USE_GPU=false
+      - MEDIAMTX_HOST=host.docker.internal
     logging:
       driver: json-file
       options:
