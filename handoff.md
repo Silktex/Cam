@@ -4,13 +4,13 @@
 
 This project is a high-precision optical studio and photometric stereo acquisition system for the **Sony ILCE-7RM3 (A7R III, 61.0 MP)** combined with a custom **ESP32 9-LED lighting rig** (1 Top Dome Light + 8 radial perimeter spotlights at 45° intervals), hardware-accelerated **MacroSilicon USB 3.0 HDMI Capture Card** streaming via AMD Radeon Vega 11 VA-API H.264 WebRTC/RTSP, and both a unified 5-Station Studio Workbench and a restored classic `/v1` cockpit in Next.js 14.
 
-All legacy MJPEG frame-polling loops have been eliminated in favor of real-time hardware-encoded RTSP (`rtsp://127.0.0.1:8554/stream`) and WebRTC WHEP (`/stream/whep`), reducing CPU usage to near-zero while enabling 100% non-blocking PTP exposure control and 61MP RAW capture.
+The HDMI capture path uses real-time hardware-encoded RTSP (`rtsp://127.0.0.1:8554/stream`) and WebRTC WHEP (`/stream/whep`), keeping CPU usage near-zero while enabling 100% non-blocking PTP exposure control and 61MP RAW capture. MJPEG is **intentionally retained** as the PTP-source live view — `GET /api/liveview/stream` serves multipart MJPEG when the stream source is `ptp` (metadata stub when `hdmi`; commits `aab4ee1`+`2445aab`) — tracked in Beads `camera_system-lqv`.
 
-All test suites and production builds are **100% passing**:
-- **Vitest Unit & Component Tests**: **155 passing** across 20 test files (`0` failures).
-- **Playwright End-to-End (E2E) UI Tests**: **40 passing** across 6 test files (`0` failures).
-- **Backend API Pytest Suite**: **228 passing** inside the Docker container on host `ind` (`0` failures).
-- **Next.js Production Build**: `17/17` routes compiled successfully.
+Measured suite truth (production-hardening truth pass, 2026-08-17; evidence: `.omo/evidence/task-3-production-hardening/summary.md`, `.omo/evidence/task-11-production-hardening/`, `.omo/evidence/task-9-production-hardening.txt` on the workspace):
+- **Backend API Pytest Suite**: **363 passing** inside the Docker container on host `ind` (`0` failures) — baseline was 228; todo 11 added +111 characterization and +24 service tests.
+- **Vitest Unit & Component Tests**: **155 tests** across 20 test files — measured **154 passing / 1 red** (stale `WebRTCStreamViewer` `vi.mock`, Beads `camera_system-8dj`).
+- **Playwright End-to-End (E2E) UI Tests**: **40 tests** across **7 spec files** — measured **39 passing / 1 red** (CAP-07 strict-mode selector drift, Beads `camera_system-34l`).
+- **Next.js Production Build**: `17/17` routes compiled successfully (re-verified post-refactor, todo 11).
 
 ---
 
@@ -94,6 +94,16 @@ All test suites and production builds are **100% passing**:
                                   | Sub-100ms Latency WHEP Player      |
                                   +------------------------------------+
 ```
+
+**Supervision (systemd — production reality since 2026-08-17, production-hardening todo 5):** the streaming stack no longer runs from the stale Desktop checkout or ad-hoc shells. It is supervised by three system units (all `Restart=always`), with `ExecStart`/`WorkingDirectory`/`Environment` repointed to the canonical checkout `/home/posh/projects/camera_system`:
+
+| systemd unit | Role |
+|---|---|
+| `camera-stream-mediamtx.service` | MediaMTX (`mediamtx.yml`) — RTSP `:8554` / WHEP `:8889` |
+| `camera-stream-publish.service` | `scripts/fps_governor.py` supervising `scripts/stream.sh` (VA-API ffmpeg publish to RTSP) |
+| `camera-stream-monitor.service` | `scripts/monitor.sh --loop --interval 5` health watchdog (`STATE_FILE=scripts/stream_state.json`) |
+
+Canonical unit copies are committed under `deploy/systemd/` (commit `a686a30`, diff-verified against the live `/etc/systemd/system/` files). Post-cutover verification: `ffprobe` reports `h264` on `rtsp://127.0.0.1:8554/stream` and the WHEP listener answers `HTTP 405` on `GET /stream/whep`. Ops: `sudo systemctl {start,stop,restart} camera-stream-{mediamtx,publish,monitor}.service` — never `kill` (Restart=always respawns). The PTP-source live view bypasses this pipeline entirely (`GET /api/liveview/stream` multipart MJPEG; see §1).
 
 ---
 

@@ -632,7 +632,7 @@ graph LR
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/liveview/stream` | MJPEG live preview stream |
+| `GET` | `/api/liveview/stream` | MJPEG stream when source is PTP; JSON metadata when HDMI (HDMI live view is WebRTC WHEP via MediaMTX) |
 | `POST` | `/api/liveview/stop` | Stop active stream |
 | `GET` | `/api/liveview/status` | Stream availability |
 
