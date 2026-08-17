@@ -56,6 +56,17 @@ _COMMAND_TIMEOUT_SECONDS = 30.0
 _CONNECT_TIMEOUT_SECONDS = 120.0
 _SHUTDOWN_TIMEOUT_SECONDS = 3.0
 
+# Subprocess bounds (seconds) for the CLI probes below.
+# gphoto2 CLI operations (--auto-detect USB enumeration, --reset PTP port
+# reset) normally finish in ~1-3s, but a wedged USB bus can hang them
+# indefinitely; 30s stays generous vs slow-but-healthy enumeration (and
+# matches the worker's _COMMAND_TIMEOUT_SECONDS budget) while guaranteeing
+# startup/health flows can never block forever.
+_GPHOTO2_SUBPROCESS_TIMEOUT = 30
+# killall -9 only delivers SIGKILL (no graceful wait to run out), so 5s is
+# already a generous bound; it only trips if killall itself hangs.
+_KILLALL_SUBPROCESS_TIMEOUT = 5
+
 
 class CameraService:
     """Thread-safe singleton camera controller."""
@@ -310,12 +321,18 @@ class CameraService:
                 result = subprocess.run(
                     ["killall", "-9", proc],
                     capture_output=True,
-                    timeout=5
+                    timeout=_KILLALL_SUBPROCESS_TIMEOUT
                 )
                 if result.returncode == 0:
                     killed.append(proc)
-            except Exception:
-                pass
+            except subprocess.TimeoutExpired:
+                # Error contract: skip the hung daemon and keep killing the
+                # rest; callers only consume the returned killed-list.
+                logger.warning(
+                    f"killall {proc} timed out after {_KILLALL_SUBPROCESS_TIMEOUT}s; skipping"
+                )
+            except Exception as e:
+                logger.debug(f"Failed to kill USB-grabbing process {proc}: {e}")
 
         if killed:
             logger.info(f"Killed USB-grabbing processes: {killed}")
@@ -346,12 +363,17 @@ class CameraService:
                 ["gphoto2", "--reset"],
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=_GPHOTO2_SUBPROCESS_TIMEOUT
             )
             logger.info(f"USB reset via gphoto2: {result.returncode == 0}")
             time.sleep(1)
             if result.returncode == 0:
                 return True
+        except subprocess.TimeoutExpired:
+            # Error contract: bool False (caller proceeds without reset).
+            logger.warning(
+                f"gphoto2 --reset timed out after {_GPHOTO2_SUBPROCESS_TIMEOUT}s"
+            )
         except Exception as e:
             logger.warning(f"gphoto2 reset failed: {e}")
 
@@ -411,7 +433,7 @@ class CameraService:
                 ["gphoto2", "--auto-detect"],
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=_GPHOTO2_SUBPROCESS_TIMEOUT
             )
             output = result.stdout
             detected = "usb:" in output.lower()
@@ -433,6 +455,14 @@ class CameraService:
                 "model": model,
                 "port": port,
             }
+        except subprocess.TimeoutExpired as e:
+            # Error contract: same not-detected dict as other detection
+            # failures; startup/health callers treat timeout as "no camera".
+            logger.error(
+                f"Camera detection timed out after {_GPHOTO2_SUBPROCESS_TIMEOUT}s "
+                f"(gphoto2 --auto-detect unresponsive): {e}"
+            )
+            return {"detected": False, "model": None, "port": None, "error": str(e)}
         except Exception as e:
             logger.error(f"Camera detection failed: {e}")
             return {"detected": False, "model": None, "port": None, "error": str(e)}
@@ -574,8 +604,9 @@ class CameraService:
         if camera:
             try:
                 camera.exit(context)
-            except Exception:
-                pass
+            except Exception as e:
+                # Expected when the camera was already unplugged.
+                logger.debug(f"camera.exit() failed during cleanup: {e}")
 
     def _cleanup_on_exit(self):
         """Ensure camera is released on process exit"""
@@ -782,19 +813,22 @@ class CameraService:
 
             try:
                 item["value"] = widget.get_value()
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Failed to read value of camera config widget {item['name']!r}: {e}")
                 item["value"] = None
 
             if widget_type in (gp.GP_WIDGET_RADIO, gp.GP_WIDGET_MENU):
                 try:
                     item["choices"] = [widget.get_choice(i) for i in range(widget.count_choices())]
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Failed to read choices of camera config widget {item['name']!r}: {e}")
                     item["choices"] = []
 
             if widget_type == gp.GP_WIDGET_RANGE:
                 try:
                     item["range"] = widget.get_range()
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Failed to read range of camera config widget {item['name']!r}: {e}")
                     item["range"] = None
 
             results.append(item)
@@ -1221,8 +1255,9 @@ class CameraService:
             for _ in range(20):  # ~2s of preview frames
                 try:
                     camera.capture_preview()
-                except Exception:
-                    pass
+                except Exception as e:
+                    # Individual preview frames may fail transiently during AF.
+                    logger.debug(f"Preview frame failed during AF pump: {e}")
                 time.sleep(0.1)
 
             # Release (value=2)

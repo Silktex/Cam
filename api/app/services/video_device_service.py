@@ -12,6 +12,13 @@ logger = logging.getLogger(__name__)
 
 MACROSILICON_NAMES = ["USB3. 0 capture", "MacroSilicon", "USB Video"]
 
+# v4l2-ctl format enumeration normally completes in well under a second, but
+# a wedged USB capture card can hang the ioctl chain. 10s bounds the probe
+# per device (multiple devices multiply the worst case) while leaving
+# headroom for slow-but-healthy enumeration; on any failure — timeout
+# included — callers fall back to the static MacroSilicon format matrix.
+_V4L2_PROBE_TIMEOUT = 10
+
 
 class VideoDeviceService:
     """Service to discover and query video capture devices."""
@@ -128,7 +135,7 @@ class VideoDeviceService:
                 ["v4l2-ctl", "--list-formats-ext", "-d", dev_node],
                 capture_output=True,
                 text=True,
-                timeout=2,
+                timeout=_V4L2_PROBE_TIMEOUT,
             )
             if res.returncode != 0 or not res.stdout:
                 return None
@@ -174,6 +181,13 @@ class VideoDeviceService:
                             pass
 
             return formats if formats else None
+        except subprocess.TimeoutExpired:
+            # Error contract: None -> caller serves the fallback format matrix.
+            logger.debug(
+                f"v4l2-ctl query {dev_node} timed out after {_V4L2_PROBE_TIMEOUT}s; "
+                "using fallback formats"
+            )
+            return None
         except Exception as e:
             logger.debug(f"v4l2-ctl query failed for {dev_node}: {e}")
             return None
