@@ -34,6 +34,7 @@ export function WebRTCStreamViewer({
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const sessionUrlRef = useRef<string | null>(null);
   const retryTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const mountedRef = useRef(true);
 
   const [connectionState, setConnectionState] = useState<'connecting' | 'connected' | 'failed' | 'fallback'>('connecting');
   const [frozenFrame, setFrozenFrame] = useState<string | null>(null);
@@ -45,10 +46,23 @@ export function WebRTCStreamViewer({
     setActiveSource(streamSource);
   }, [streamSource]);
 
+  // Re-set on every mount (StrictMode remounts): async WHEP flows surviving
+  // unmount must not start new connections or schedule retry timers
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   // Connect via WebRTC WHEP
   const connectWhep = useCallback(async () => {
     if (typeof window === 'undefined' || typeof RTCPeerConnection === 'undefined') {
       setConnectionState('fallback');
+      return;
+    }
+
+    if (!mountedRef.current) {
       return;
     }
 
@@ -90,7 +104,7 @@ export function WebRTCStreamViewer({
           setConnectionState('connected');
         } else if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
           setConnectionState('fallback');
-          if (!retryTimerRef.current) {
+          if (mountedRef.current && !retryTimerRef.current) {
             retryTimerRef.current = setTimeout(() => {
               connectWhep();
             }, 4000);
@@ -123,7 +137,7 @@ export function WebRTCStreamViewer({
     } catch (err) {
       console.warn('WebRTC WHEP connection failed, using hardware fallback:', err);
       setConnectionState('fallback');
-      if (!retryTimerRef.current) {
+      if (mountedRef.current && !retryTimerRef.current) {
         retryTimerRef.current = setTimeout(() => {
           connectWhep();
         }, 5000);
@@ -144,6 +158,7 @@ export function WebRTCStreamViewer({
         retryTimerRef.current = null;
       }
       if (pcRef.current) {
+        pcRef.current.getTransceivers().forEach((transceiver) => transceiver.stop());
         pcRef.current.close();
         pcRef.current = null;
       }
