@@ -1,0 +1,132 @@
+# Hardware suite — the ONLY workflow allowed on the self-hosted studio runner
+# (labels: self-hosted, ind, hardware; host ESP-PC, service user gh-runner).
+#
+# TRIGGER POLICY (plan grilled Q9): workflow_dispatch + nightly schedule ONLY.
+# NEVER add push/pull_request triggers — this suite actuates the physical Sony
+# camera and the 9-light ESP32 rig and must not fire on every push.
+#
+# CONTENTION POLICY:
+#   - concurrency group `hardware-ci` with cancel-in-progress: false serializes
+#     runs so two suites can never fight over the camera/lights.
+#   - Idle-guard preflight aborts when the live studio stack reports a batch
+#     in progress. KNOWN BLIND SPOT (accepted residual risk, Beads-tracked):
+#     the guard observes BATCH state only; a single in-progress capture is NOT
+#     observable via /api/batch/status.
+#
+# EXECUTION ENVIRONMENT: NATIVE host, NOT docker — the runner user has no
+# docker group and no sudo by design. Python comes from the prebuilt runner
+# venv ~/ci-venv (built once at setup time from api/requirements.txt + CPU
+# torch index; see .omo evidence task-12 for the build transcript). Node/npm
+# are system-installed (/usr/local/node20). Playwright chromium browsers are
+# pre-installed in the runner user's ~/.cache/ms-playwright (1.58.2) with
+# system deps installed once as root at setup — no runtime sudo anywhere.
+#
+# PORTS: the live stack owns 3000/8000. This workflow uses its own throwaway
+# uvicorn on 8100 and Playwright's webServer `next start -p 3456` (port pinned
+# by web/playwright.config.ts), wired via next rewrites env overrides:
+# INTERNAL_API_URL -> 8100, mediamtx WHEP/HLS -> loopback 8889/8888.
+#
+# CHECKOUT STRATEGY: actions/checkout into the runner's own work directory
+# (repo is public — no credentials needed; /home/posh is mode 700 so a direct
+# path to the developer checkout is deliberately NOT used).
+
+name: Hardware suite (on-demand + nightly)
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 06:00 UTC = 02:00 America/New_York (EDT) nightly
+    - cron: '0 6 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hardware-ci
+  cancel-in-progress: false
+
+jobs:
+  hardware:
+    name: API pytest (live hardware) + Playwright e2e
+    runs-on: [self-hosted, ind, hardware]
+    timeout-minutes: 90
+    env:
+      # Mirror docker-compose environment for the app (no secrets involved —
+      # values already public in docker-compose.yml in this repo)
+      ESP32_HOST: 10.10.2.20
+      DEBUG: 'false'
+      LOG_LEVEL: INFO
+      USE_GPU: 'false'
+      # Native host: mediamtx is on loopback, not host.docker.internal
+      MEDIAMTX_HOST: 127.0.0.1
+    steps:
+      - name: Idle-guard preflight (abort if a studio batch is running)
+        run: |
+          set -u
+          status="$(curl -sf --max-time 10 http://localhost:8000/api/batch/status || echo '{}')"
+          is_running="$(printf '%s' "$status" | python3 -c 'import json,sys
+          try:
+              print(str(json.load(sys.stdin).get("is_running", False)).lower())
+          except Exception:
+              print("unknown")')"
+          echo "batch status probe -> is_running=${is_running}"
+          if [ "$is_running" = "true" ]; then
+            echo "::error title=studio-busy::Hardware CI aborted — a capture batch is running in the studio (is_running=true at localhost:8000/api/batch/status). Re-dispatch when the studio is idle."
+            exit 1
+          fi
+          echo "::notice title=idle-guard::Studio idle (is_running=${is_running}) — hardware CI cleared to run."
+
+      - uses: actions/checkout@v4
+
+      - name: Full API pytest suite (live hardware — camera + ESP32 rig)
+        timeout-minutes: 30
+        run: |
+          source "$HOME/ci-venv/bin/activate"
+          cd api
+          python -m pytest -q
+
+      - name: Start throwaway API (uvicorn on 127.0.0.1:8100)
+        run: |
+          source "$HOME/ci-venv/bin/activate"
+          cd api
+          nohup python -m uvicorn main:app --host 127.0.0.1 --port 8100 \
+            > /tmp/hwci-uvicorn.log 2>&1 &
+          echo "HWCI_UVICORN_PID=$!" >> "$GITHUB_ENV"
+
+      - name: Wait for throwaway API readiness
+        run: |
+          for i in $(seq 1 45); do
+            if curl -sf http://127.0.0.1:8100/openapi.json > /dev/null; then
+              echo "throwaway API ready after ${i} polls"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error title=uvicorn-8100::throwaway uvicorn never became ready"
+          tail -80 /tmp/hwci-uvicorn.log || true
+          exit 1
+
+      - name: Web e2e (Playwright chromium, next :3456 -> uvicorn :8100)
+        timeout-minutes: 40
+        working-directory: web
+        run: |
+          npm ci
+          # Bake relative /api + /ws into the client bundle (same recipe as the
+          # docker image build args), then route rewrites to our 8100 API.
+          NEXT_PUBLIC_API_URL="" NEXT_PUBLIC_WS_URL="" NEXT_TELEMETRY_DISABLED=1 \
+            npm run build
+          CI=1 \
+            INTERNAL_API_URL=http://127.0.0.1:8100/api \
+            INTERNAL_MEDIAMTX_WHEP_URL=http://127.0.0.1:8889/stream \
+            INTERNAL_MEDIAMTX_HLS_URL=http://127.0.0.1:8888 \
+            npm run test:e2e
+
+      - name: Stop throwaway API
+        if: always()
+        run: |
+          pid="${HWCI_UVICORN_PID:-}"
+          if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" || true
+            echo "throwaway uvicorn ($pid) stopped"
+          fi
+          rm -f /tmp/hwci-uvicorn.log || true
