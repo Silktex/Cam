@@ -1,114 +1,190 @@
-# Camera Control System — Agent Guide & Access Reference
+# Project Instructions for AI Agents
 
-This document provides a comprehensive onboarding guide, connectivity details, architecture summary, and tracking guidelines for AI agents working on this project. 
+This file provides instructions and context for AI coding agents working on this project.
 
----
+<!-- BEGIN BEADS INTEGRATION v:1 profile:full hash:19cc25d9 -->
+## Issue Tracking with bd (beads)
 
-## 🔑 Host Connection & Access Information
+**IMPORTANT**: This project uses **bd (beads)** for ALL issue tracking. Do NOT use markdown TODOs, task lists, or other tracking methods.
 
-The development environment and camera hardware are deployed on the remote host **`ind`** (`ESP-PC`).
+### Why bd?
 
-### Remote Host Details
-* **Host Identifier:** `ind`
-* **Hostname/IP:** `10.10.2.21`
-* **User:** `posh`
-* **Default Port:** `22` (SSH)
-* **Workspace Path:** `/home/posh/projects/camera_system`
+- Dependency-aware: Track blockers and relationships between issues
+- Git-friendly: Dolt-powered version control with native sync
+- Agent-optimized: JSON output, ready work detection, discovered-from links
+- Prevents duplicate tracking systems and confusion
 
-### Configure Local SSH Config
-To connect directly, ensure your local `/home/rc/.ssh/config` file is configured as follows:
+### Quick Start
 
-```ssh
-Host ind
-  Hostname 10.10.2.21
-  User posh
-  IdentityFile ~/.ssh/id_ed25519
-  IdentitiesOnly yes
+**Check for ready work:**
+
+```bash
+bd ready --json
 ```
 
-With this setup, standard commands like `ssh ind` and `scp ind:...` will connect directly.
+**Create new issues:**
 
-
----
-
-## 🌐 Running Services (Host `ind`)
-
-The system runs inside a multi-process Docker container on `ind`:
-
-| Service | URL | Description |
-|:---|:---|:---|
-| **Web UI** | http://10.10.2.21:3000 | Next.js 14 frontend |
-| **API Docs** | http://10.10.2.21:8000/docs | Swagger UI for FastAPI backend |
-| **Meilisearch** | http://10.10.2.21:7700 | Product and fabric search engine |
-
----
-
-## 🏗️ Project Architecture & Capabilities
-
-The **Camera Control System** is designed to automate high-precision product photography, multi-light capturing, color calibration, and PBR (Physically Based Rendering) texture map generation.
-
-```
- +-----------+     USB/PTP      +------------------+     HTTP     +------------------+
- | Sony      | <--------------> |   FastAPI         | <---------> |   Next.js        |
- | A7R III   |                  |   Backend :8000   |             |   Frontend :3000 |
- +-----------+                  +------------------+             +------------------+
-                                       ^    ^                           |
-                                       |    |                           |
-                                HTTP   |    |  WebSocket                | WebSocket
-                                       |    |                           |
-                                +------+    +------+                    |
-                                |                  |                    |
-                          +-----------+     +-------------+      +-------------+
-                          |  ESP32    |     | Meilisearch |      |  Browser    |
-                          |  Lights   |     |  :7700      |      |  Client     |
-                          +-----------+     +-------------+      +-------------+
+```bash
+bd create "Issue title" --description="Detailed context" -t bug|feature|task -p 0-4 --json
+bd create "Issue title" --description="What this issue is about" -p 1 --deps discovered-from:bd-123 --json
 ```
 
-### Core Architecture Components (Remote `ind`)
-* **Camera Rig:** Sony A7R III (61MP) controlled over USB PTP using `libgphoto2`.
-* **Light Rig:** 9x LED panels (1 Top + 8 Side) controlled via an ESP32 micro-controller on the local network (default: `192.168.0.44`).
-* **Backend:** FastAPI (Python 3.12) server handling hardware control, EventBus websocket events, color science (using `colour-science`), boundary detection (SAM/MobileSAM), and database logging (SQLite).
-* **Frontend:** Next.js 14 React UI.
+**Claim and update:**
 
----
+```bash
+bd update <id> --claim --json
+bd update bd-42 --priority 1 --json
+```
 
-## 📌 Issue Tracking & Task Workflow (`bd`)
+**Complete work:**
 
-This project uses **`bd` (beads)** for durable task tracking and issue management. Do NOT use markdown TODOs or ad-hoc lists.
+```bash
+bd close bd-42 --reason "Completed" --json
+```
 
-### Quick Reference Commands
-All issue status is backed by a Dolt database on host `ind`.
-* `bd ready` — List unblocked work items.
-* `bd show <id>` — View details of a specific issue.
-* `bd update <id> --claim` — Claim a task atomically.
-* `bd close <id> --reason "Done"` — Close a completed task.
-* `bd dolt push` / `bd dolt pull` — Sync issue database to/from the remote git branch `refs/dolt/data`.
+### Issue Types
 
-### Agent Conduct Rules
-* Propose commits/pushes to the user before running them unless in an explicit Team-maintainer profile.
-* Never modify `.beads/issues.jsonl` manually; it is a passive export. Always use the `bd` CLI tool.
+- `bug` - Something broken
+- `feature` - New functionality
+- `task` - Work item (tests, docs, refactoring)
+- `epic` - Large feature with subtasks
+- `chore` - Maintenance (dependencies, tooling)
 
----
+### Priorities
 
-## 🛠️ Current Status & Active Working Tree
+- `0` - Critical (security, data loss, broken builds)
+- `1` - High (major features, important bugs)
+- `2` - Medium (default, nice-to-have)
+- `3` - Low (polish, optimization)
+- `4` - Backlog (future ideas)
 
-A previous session implemented and verified crucial hardware lifecycle and usb-reset bugfixes. The modifications are currently **uncommitted** in the remote working tree on `ind`.
+### Workflow for AI Agents
 
-### Uncommitted Files on `ind`
-1. **`api/app/services/camera_service.py`**
-   * *Fixes:* Rewrote worker thread lifecycle. Thread-safe EventBus publishes transfer loop safely. Camera disconnection/troubleshooting no longer calls `camera.exit()` cross-thread to avoid segfaults.
-   * *Troubleshoot Fix:* Removed the destructive USB reset ioctl (`gphoto2 --reset`) from troubleshoot because it wedged the Sony A7R III PTP stack (requiring physical battery pulls). It now performs a clean disconnect -> detect -> reconnect sequence (~2.3 seconds recovery).
-2. **`api/tests/test_camera_concurrency.py`**
-   * *Fixes:* Concurrency and event bus threading regression tests.
-3. **`web/app/all/components/DashboardHeader.tsx`**
-   * *Fixes:* Removed the `Ctrl+T` / `Cmd+T` keyboard shortcut that was hijacking browser tabs and firing destructive troubleshoot commands.
+1. **Check ready work**: `bd ready` shows unblocked issues
+2. **Claim your task atomically**: `bd update <id> --claim`
+3. **Work on it**: Implement, test, document
+4. **Discover new work?** Create linked issue:
+   - `bd create "Found bug" --description="Details about what was found" -p 1 --deps discovered-from:<parent-id>`
+5. **Complete**: `bd close <id> --reason "Done"`
 
----
+### Quality
+- Use `--acceptance` and `--design` fields when creating issues
+- Use `--validate` to check description completeness
 
-## 📋 Recommended Follow-Up Actions
+### Lifecycle
+- `bd defer <id>` / `bd supersede <id>` for issue management
+- `bd stale` / `bd orphans` / `bd lint` for hygiene
+- `bd human <id>` to flag for human decisions
+- `bd formula list` / `bd mol pour <name>` for structured workflows
 
-If you are picking up work on host `ind`, follow this order of priority:
-1. **Commit the changes:** Verify the three modified files on `ind` and commit them.
-2. **Fix `kill_ptp_processes` `psmisc` issue:** The current runtime Docker image is missing `psmisc` (causing `killall` to fail with `FileNotFoundError`). Add `psmisc` to `RUN apt-get install` in `Dockerfile`.
-3. **Resolve `atexit` logging noise:** `CameraService` singleton registration prints ValueError on closed file descriptors during test tear-downs. Consider module-level registration or a quiet shutdown guard.
-4. **⚠️ DO NOT reintroduce USB reset:** Keep the USB reset commented out / disabled. The A7R III cannot recover from `gphoto2 --reset` without physical power cycles.
+### Sync
+
+bd stores issue history in Dolt:
+
+- Each write auto-commits to Dolt history
+- Use `bd dolt push`/`bd dolt pull` for remote sync
+- Do not treat `.beads/issues.jsonl` as the sync protocol
+
+**Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
+
+### Important Rules
+
+- ✅ Use bd for ALL task tracking
+- ✅ Always use `--json` flag for programmatic use
+- ✅ Link discovered work with `discovered-from` dependencies
+- ✅ Check `bd ready` before asking "what should I work on?"
+- ❌ Do NOT create markdown TODO lists
+- ❌ Do NOT use external issue trackers
+- ❌ Do NOT duplicate tracking systems
+
+For more details, see README.md and docs/QUICKSTART.md.
+
+## Agent Context Profiles
+
+The managed Beads block is task-tracking guidance, not permission to override repository, user, or orchestrator instructions.
+
+- **Conservative (default)**: Use `bd` for task tracking. Do not run git commits, git pushes, or Dolt remote sync unless explicitly asked. At handoff, report changed files, validation, and suggested next commands.
+- **Minimal**: Keep tool instruction files as pointers to `bd prime`; use the same conservative git policy unless active instructions say otherwise.
+- **Team-maintainer**: Only when the repository explicitly opts in, agents may close beads, run quality gates, commit, and push as part of session close. A current "do not commit" or "do not push" instruction still wins.
+
+## Session Completion
+
+This protocol applies when ending a Beads implementation workflow. It is subordinate to explicit user, repository, and orchestrator instructions.
+
+1. **File issues for remaining work** - Create beads for anything that needs follow-up
+2. **Run quality gates** (if code changed) - Tests, linters, builds
+3. **Update issue status** - Close finished work, update in-progress items
+4. **Handle git/sync by active profile**:
+   ```bash
+   # Conservative/minimal/default: report status and proposed commands; wait for approval.
+   git status
+
+   # Team-maintainer opt-in only, unless current instructions forbid it:
+   git pull --rebase
+   bd dolt push
+   git push
+   git status
+   ```
+5. **Hand off** - Summarize changes, validation, issue status, and any blocked sync/commit/push step
+
+**Critical rules:**
+- Explicit user or orchestrator instructions override this Beads block.
+- Do not commit or push without clear authority from the active profile or the current user request.
+- If a required sync or push is blocked, stop and report the exact command and error.
+
+<!-- END BEADS INTEGRATION -->
+
+
+## Infrastructure & SSH Access
+
+- **Target Host `ind`**: `10.10.2.21` (`ESP-PC`, user `posh`).
+- **SSH Command**: Use standard `ssh ind` (configured in `~/.ssh/config` with native multiplexing).
+- **Rule**: ALWAYS use `ssh ind` to access host `ind`. Do NOT use `ssh -S /home/rc/.ssh/cm-ind posh@10.10.2.21`.
+- **Public Domain**: `https://cam.silktex.com` routes through Cloudflare to NetBird Reverse Proxy (`silktex-proxy` capturing ports 80 & 443 on `ind`) and proxies to internal gateway `http://10.10.2.21:3100` (`cam-gateway`).
+
+## Build & Test
+
+```bash
+# Frontend Next.js build
+npm --prefix web run build
+
+# Docker container build & restart on host ind
+ssh ind "cd /home/posh/projects/camera_system && sudo docker compose up -d --build camera-system"
+```
+
+## Architecture Overview
+
+- **Frontend**: Next.js 14 App Router on port `3000` (5 Optical Studio Stations).
+- **Backend**: FastAPI on port `8000` (Camera PTP, ColorChecker calibration, PBR synthesizer).
+- **Reverse Proxy Gateway**: `cam-gateway` (Nginx 1.27) on port `3100`.
+- **Ingress Proxy**: `silktex-proxy` (NetBird reverse proxy) capturing host ports `80` and `443`.
+
+## Conventions & Patterns
+
+- Always access host `ind` via `ssh ind`.
+- **Git Repository & Remotes Rule**: ONLY commit and push to `silktex/cam` (`https://github.com/Silktex/Cam.git`). NEVER commit or push to `silktex/camera_system`.
+
+
+<!-- BEGIN BEADS CODEX SETUP: generated by bd setup codex -->
+## Beads Issue Tracker
+
+Use Beads (`bd`) for durable task tracking in repositories that include it. Use the `beads` skill at `.agents/skills/beads/SKILL.md` (project install) or `~/.agents/skills/beads/SKILL.md` (global install) for Beads workflow guidance, then use the `bd` CLI for issue operations.
+
+### Quick Reference
+
+```bash
+bd ready                # Find available work
+bd show <id>            # View issue details
+bd update <id> --claim  # Claim work
+bd close <id>           # Complete work
+bd prime                # Refresh Beads context
+```
+
+### Rules
+
+- Use `bd` for all task tracking; do not create markdown TODO lists.
+- Run `bd prime` when Beads context is missing or stale. Codex 0.129.0+ can load Beads context automatically through native hooks; use `/hooks` to inspect or toggle them.
+- Keep persistent project memory in Beads via `bd remember`; do not create ad hoc memory files.
+
+**Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
+<!-- END BEADS CODEX SETUP -->
