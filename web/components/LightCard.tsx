@@ -31,9 +31,10 @@ export function LightCard({ light, onToggle, onBrightnessChange }: LightCardProp
     <div
       className={`
         relative overflow-hidden rounded-2xl p-6 transition-all duration-300
+        bg-slate-900/60
         ${light.on
-          ? 'bg-teal-950/40 border-teal-400/70 shadow-lg shadow-teal-500/20'
-          : 'bg-slate-900/60 border-slate-700'
+          ? 'border-green-400/70 shadow-lg shadow-green-500/20'
+          : 'border-red-400/40'
         }
         border
       `}
@@ -41,9 +42,9 @@ export function LightCard({ light, onToggle, onBrightnessChange }: LightCardProp
       {/* Active indicator bar */}
       <div
         className={`
-          absolute top-0 left-0 right-0 h-1 bg-teal-500
+          absolute top-0 left-0 right-0 h-1
           transition-opacity duration-300
-          ${light.on ? 'opacity-100' : 'opacity-0'}
+          ${light.on ? 'bg-green-500 opacity-100' : 'bg-red-500 opacity-0'}
         `}
       />
 
@@ -54,17 +55,17 @@ export function LightCard({ light, onToggle, onBrightnessChange }: LightCardProp
             {light.on ? '💡' : '🔌'}
           </span>
           <div>
-            <h3 className="font-semibold text-white">{light.name}</h3>
+            <h3 className={`font-semibold ${light.on ? 'text-green-400' : 'text-red-400'}`}>{light.name}</h3>
             <p className="text-xs text-slate-400">GPIO {light.pin}</p>
           </div>
         </div>
 
         {/* Explicit ON/OFF state label - don't rely on color/opacity alone */}
         <span
-          className={`text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full mr-2 ${
+          className={`text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full mr-2 border ${
             light.on
-              ? 'bg-teal-500 text-slate-900'
-              : 'bg-slate-700 text-slate-400'
+              ? 'bg-green-500/20 text-green-400 border-green-500/50'
+              : 'bg-red-500/20 text-red-400 border-red-500/50'
           }`}
         >
           {light.on ? 'ON' : 'OFF'}
@@ -78,8 +79,8 @@ export function LightCard({ light, onToggle, onBrightnessChange }: LightCardProp
             onChange={(e) => onToggle(light.id, e.target.checked)}
             className="sr-only peer"
           />
-          <div className="w-full h-full bg-slate-700 rounded-full peer-checked:bg-teal-500 transition-all" />
-          <div className="absolute top-1 left-1 w-5 h-5 bg-slate-500 rounded-full peer-checked:translate-x-7 peer-checked:bg-white transition-all" />
+          <div className="w-full h-full bg-red-900/60 rounded-full peer-checked:bg-green-500 transition-all" />
+          <div className="absolute top-1 left-1 w-5 h-5 bg-slate-300 rounded-full peer-checked:translate-x-7 peer-checked:bg-white transition-all" />
         </label>
       </div>
 
@@ -87,7 +88,7 @@ export function LightCard({ light, onToggle, onBrightnessChange }: LightCardProp
       <div>
         <div className="flex justify-between text-sm text-slate-400 mb-2">
           <span>Brightness</span>
-          <span className="text-teal-400 font-semibold">{localBrightness}%</span>
+          <span className={`font-semibold ${light.on ? 'text-green-400' : 'text-red-400'}`}>{localBrightness}%</span>
         </div>
         <input
           type="range"

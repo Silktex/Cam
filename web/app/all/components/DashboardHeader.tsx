@@ -204,12 +204,12 @@ export default function DashboardHeader() {
           <button
             onClick={handleToggleConnection}
             disabled={isPending}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 border ${
-              // Styled by the action the button performs, not the current
-              // state (#2): Disconnect is destructive, Connect is positive.
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 border-2 ${
+              // Colored by current connection state: green while connected,
+              // red while disconnected.
               isConnected
-                ? 'bg-red-500/20 text-red-400 border-red-500/40 hover:bg-red-500/30'
-                : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 hover:bg-emerald-500/30'
+                ? 'bg-emerald-500/25 text-emerald-400 border-emerald-500 hover:bg-emerald-500/35'
+                : 'bg-red-500/25 text-red-400 border-red-500 hover:bg-red-500/35'
             }`}
           >
             {connectMutation.isPending || disconnectMutation.isPending ? (

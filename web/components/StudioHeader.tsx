@@ -191,9 +191,7 @@ export default function StudioHeader({ stationSubtitle = 'STUDIO WORKBENCH' }: S
         )}
 
         {/* Camera Status Pod */}
-        <div className={`flex items-center gap-2 px-2.5 py-1 rounded bg-surface-raised border text-xs font-mono transition-colors ${
-          isConnected ? 'border-status-ok/30' : 'border-status-err/30'
-        }`}>
+        <div className="flex items-center gap-2 px-2.5 py-1 rounded bg-surface-raised border border-border-subtle text-xs font-mono">
           <span
             className={`w-2 h-2 rounded-full ${
               isConnected ? 'bg-status-ok animate-pulse' : 'bg-status-err'
@@ -206,12 +204,12 @@ export default function StudioHeader({ stationSubtitle = 'STUDIO WORKBENCH' }: S
             onClick={handleToggleConnection}
             disabled={isPending}
             title={isConnected ? 'Disconnect Camera (Ctrl+C)' : 'Connect Camera (Ctrl+C)'}
-            className={`ml-1 px-2 py-0.5 rounded transition flex items-center gap-1 border font-bold text-[11px] ${
-              // Styled by the action the button performs, not the current
-              // state (#2): Disconnect is destructive, Connect is positive.
+            className={`ml-1 px-2 py-0.5 rounded transition flex items-center gap-1 border-2 font-bold text-[11px] ${
+              // Colored by current connection state: green while connected,
+              // red while disconnected.
               isConnected
-                ? 'bg-status-err/20 text-status-err border-status-err/40 hover:bg-status-err/30'
-                : 'bg-status-ok/20 text-status-ok border-status-ok/40 hover:bg-status-ok/30'
+                ? 'bg-status-ok/25 text-status-ok border-status-ok hover:bg-status-ok/35'
+                : 'bg-status-err/25 text-status-err border-status-err hover:bg-status-err/35'
             }`}
           >
             {connectMutation.isPending || disconnectMutation.isPending ? (

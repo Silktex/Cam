@@ -282,6 +282,11 @@ export default function UnifiedCaptureStudioPage() {
     setAllLights,
   } = useLightsWebSocket();
 
+  // Empty until the first WS state_update arrives - used to show a skeleton
+  // instead of guessing a light's state (was defaulting to "on", so every
+  // card flashed green on a hard refresh before real data showed up).
+  const lightsLoaded = lights.length > 0;
+
   const [masterLux, setMasterLux] = useState(100);
 
   // Sync Live View Stream
@@ -368,7 +373,7 @@ export default function UnifiedCaptureStudioPage() {
   // 9-LED Rig Controls
   const getLightState = (id: number) => {
     const light = lights.find((l) => l.id === id);
-    return light?.on ?? true;
+    return light?.on ?? false;
   };
 
   const handleToggleLight = (id: number) => {
@@ -841,12 +846,22 @@ export default function UnifiedCaptureStudioPage() {
               </div>
 
               {/* Dedicated 9-Channel Individual Toggle Buttons Grid */}
-              <div className="space-y-2 pt-1">
+              {/* <div className="space-y-2 pt-1">
                 <div className="flex items-center justify-between text-xs font-mono text-gray-400">
                   <span className="font-semibold uppercase tracking-wider text-[11px]">INDIVIDUAL LIGHT TOGGLES</span>
                   <span className="text-[10px] text-gray-500 font-mono">Keys: [T], [1-8]</span>
                 </div>
 
+                {!lightsLoaded ? (
+                  <div className="grid grid-cols-3 gap-2">
+                    {LIGHT_CHANNELS.map((ch) => (
+                      <div
+                        key={ch.id}
+                        className="p-2.5 rounded-lg border border-border-subtle bg-surface-raised/70 animate-pulse h-[62px]"
+                      />
+                    ))}
+                  </div>
+                ) : (
                 <div className="grid grid-cols-3 gap-2">
                   {LIGHT_CHANNELS.map((ch) => {
                     const isOn = getLightState(ch.id);
@@ -855,25 +870,25 @@ export default function UnifiedCaptureStudioPage() {
                         key={ch.id}
                         onClick={() => handleToggleLight(ch.id)}
                         title={`Toggle ${ch.name} (Key: ${ch.shortcut})`}
-                        className={`p-2.5 rounded-lg border text-left flex flex-col justify-between transition-all duration-150 active:scale-95 cursor-pointer shadow-sm ${
+                        className={`p-2.5 rounded-lg border bg-surface-raised/70 text-left flex flex-col justify-between transition-all duration-150 active:scale-95 cursor-pointer shadow-sm ${
                           isOn
-                            ? 'bg-accent/15 border-accent/70 text-white shadow-accent/10 ring-1 ring-accent/40'
-                            : 'bg-surface-raised/70 border-border-subtle text-gray-400 hover:text-gray-200 hover:bg-surface-raised hover:border-border-strong'
+                            ? 'border-green-500/70 text-white shadow-green-500/10 ring-1 ring-green-500/40'
+                            : 'border-red-500/40 text-gray-400 hover:text-gray-200 hover:border-red-500/60'
                         }`}
                       >
                         <div className="flex items-center justify-between w-full mb-1.5">
                           <span
                             className={`w-2 h-2 rounded-full transition-all ${
                               isOn
-                                ? 'bg-accent shadow-sm shadow-accent animate-pulse'
-                                : 'bg-zinc-700'
+                                ? 'bg-green-400 shadow-sm shadow-green-400 animate-pulse'
+                                : 'bg-red-500'
                             }`}
                           />
                           <span
-                            className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded transition-colors ${
+                            className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border transition-colors ${
                               isOn
-                                ? 'bg-accent text-chassis font-extrabold'
-                                : 'bg-black/50 text-gray-400 border border-white/5'
+                                ? 'bg-green-500/20 text-green-400 border-green-500/50 font-extrabold'
+                                : 'bg-red-500/20 text-red-400 border-red-500/50'
                             }`}
                           >
                             {isOn ? 'ON' : 'OFF'}
@@ -881,7 +896,7 @@ export default function UnifiedCaptureStudioPage() {
                         </div>
                         <div className="flex items-end justify-between w-full">
                           <div>
-                            <div className="text-xs font-mono font-bold tracking-tight text-gray-100">
+                            <div className={`text-xs font-mono font-bold tracking-tight ${isOn ? 'text-green-400' : 'text-red-400'}`}>
                               {ch.name}
                             </div>
                             <div className="text-[10px] text-gray-400 font-mono">
@@ -896,7 +911,8 @@ export default function UnifiedCaptureStudioPage() {
                     );
                   })}
                 </div>
-              </div>
+                )}
+              </div> */}
             </div>
 
             {/* RECENT CAPTURES FILMSTRIP */}

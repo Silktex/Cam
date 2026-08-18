@@ -1,5 +1,10 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
 @import "tailwindcss";
+/* Tailwind v4 doesn't auto-load tailwind.config.ts (JS config is opt-in via
+   @config) - without this, every custom color (status-ok/err/warn, accent,
+   chassis, surface, teal...) silently compiled to nothing sitewide, which is
+   why colored borders/buttons rendered as plain white/gray. */
+@config "../tailwind.config.ts";
 
 :root {
   --background: #121417;
