@@ -1,13 +1,12 @@
 'use client';
 
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  getCameraStatus,
   connectCamera,
   disconnectCamera,
   troubleshootCamera,
-  type CameraStatus,
 } from '@/lib/api';
+import { useCameraWebSocket } from '@/hooks/useCameraWebSocket';
 import { Camera, Power, Settings, Loader2, Wrench, Images, Workflow, Keyboard, Palette } from 'lucide-react';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { usePathname } from 'next/navigation';
@@ -20,11 +19,15 @@ export default function DashboardHeader() {
   const [message, setMessage] = useState<string | null>(null);
   const [showShortcuts, setShowShortcuts] = useState(false);
 
-  const { data: status } = useQuery({
-    queryKey: ['camera', 'status'],
-    queryFn: () => getCameraStatus().then((res) => res.data as CameraStatus),
-    refetchInterval: 5000,
-  });
+  // Pushed by the backend over /api/ws/events instead of polled (#3).
+  const { status, lastError } = useCameraWebSocket();
+
+  useEffect(() => {
+    if (!lastError) return;
+    setMessage(lastError);
+    const timer = setTimeout(() => setMessage(null), 6000);
+    return () => clearTimeout(timer);
+  }, [lastError]);
 
   const autoConnectAttempted = useRef(false);
 
@@ -202,9 +205,11 @@ export default function DashboardHeader() {
             onClick={handleToggleConnection}
             disabled={isPending}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 border ${
+              // Styled by the action the button performs, not the current
+              // state (#2): Disconnect is destructive, Connect is positive.
               isConnected
-                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 hover:bg-red-500/20 hover:text-red-400 hover:border-red-500/40'
-                : 'bg-red-500/20 text-red-400 border-red-500/40 hover:bg-emerald-500/20 hover:text-emerald-400 hover:border-emerald-500/40'
+                ? 'bg-red-500/20 text-red-400 border-red-500/40 hover:bg-red-500/30'
+                : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 hover:bg-emerald-500/30'
             }`}
           >
             {connectMutation.isPending || disconnectMutation.isPending ? (

@@ -5,14 +5,13 @@ import {
   getLiveViewStatus,
   setLiveViewSource,
   stopLiveView,
-  getCameraStatus,
   triggerAutofocus,
   startStream as startStreamApi,
   stopStream as stopStreamApi,
   getStreamHlsUrl,
-  type CameraStatus,
   type LiveViewStatus,
 } from '@/lib/api';
+import { useCameraWebSocket } from '@/hooks/useCameraWebSocket';
 import { Video, VideoOff, RefreshCw, Focus, Layers } from 'lucide-react';
 import { useState, useCallback } from 'react';
 import { WebRTCStreamViewer } from '@/components/WebRTCStreamViewer';
@@ -23,11 +22,8 @@ export default function LiveViewPanel() {
   const [streamSource, setStreamSource] = useState<'hdmi' | 'ptp'>('hdmi');
   const [isFrozen, setIsFrozen] = useState(false);
 
-  const { data: cameraStatus } = useQuery({
-    queryKey: ['camera', 'status'],
-    queryFn: () => getCameraStatus().then((res) => res.data as CameraStatus),
-    refetchInterval: 5000,
-  });
+  // Pushed by the backend over /api/ws/events instead of polled (#3).
+  const { status: cameraStatus } = useCameraWebSocket();
 
   const { data: streamStatus } = useQuery({
     queryKey: ['liveview', 'status'],

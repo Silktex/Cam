@@ -32,8 +32,8 @@ export function LightCard({ light, onToggle, onBrightnessChange }: LightCardProp
       className={`
         relative overflow-hidden rounded-2xl p-6 transition-all duration-300
         ${light.on
-          ? 'bg-slate-800/80 border-teal-500/40 shadow-lg shadow-teal-500/10'
-          : 'bg-slate-800/50 border-slate-700'
+          ? 'bg-teal-950/40 border-teal-400/70 shadow-lg shadow-teal-500/20'
+          : 'bg-slate-900/60 border-slate-700'
         }
         border
       `}
@@ -58,6 +58,17 @@ export function LightCard({ light, onToggle, onBrightnessChange }: LightCardProp
             <p className="text-xs text-slate-400">GPIO {light.pin}</p>
           </div>
         </div>
+
+        {/* Explicit ON/OFF state label - don't rely on color/opacity alone */}
+        <span
+          className={`text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full mr-2 ${
+            light.on
+              ? 'bg-teal-500 text-slate-900'
+              : 'bg-slate-700 text-slate-400'
+          }`}
+        >
+          {light.on ? 'ON' : 'OFF'}
+        </span>
 
         {/* Toggle Switch */}
         <label className="relative w-14 h-7 cursor-pointer">

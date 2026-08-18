@@ -56,9 +56,11 @@ export function CameraControl() {
           onClick={() => isConnected ? disconnectMutation.mutate() : connectMutation.mutate()}
           disabled={isPending}
           className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-medium transition-colors disabled:opacity-50 text-white ${
+            // Styled by the action the button performs, not the current
+            // state (#2): Disconnect is destructive, Connect is positive.
             isConnected
-              ? 'bg-emerald-600 hover:bg-emerald-700 shadow-sm'
-              : 'bg-red-600 hover:bg-red-700 shadow-sm'
+              ? 'bg-red-600 hover:bg-red-700 shadow-sm'
+              : 'bg-emerald-600 hover:bg-emerald-700 shadow-sm'
           }`}
         >
           {(connectMutation.isPending || disconnectMutation.isPending) ? (

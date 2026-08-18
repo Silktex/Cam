@@ -1,15 +1,14 @@
 'use client';
 
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  getCameraStatus,
   connectCamera,
   disconnectCamera,
   troubleshootCamera,
   setLiveViewSource,
-  type CameraStatus,
 } from '@/lib/api';
 import { useLightsWebSocket } from '@/hooks/useLightsWebSocket';
+import { useCameraWebSocket } from '@/hooks/useCameraWebSocket';
 import { Power, Loader2, RefreshCw, Keyboard } from 'lucide-react';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { usePathname } from 'next/navigation';
@@ -26,13 +25,19 @@ export default function StudioHeader({ stationSubtitle = 'STUDIO WORKBENCH' }: S
   const [message, setMessage] = useState<string | null>(null);
   const [showShortcuts, setShowShortcuts] = useState(false);
 
-  const { data: status } = useQuery({
-    queryKey: ['camera', 'status'],
-    queryFn: () => getCameraStatus().then((res) => res.data as CameraStatus),
-    refetchInterval: 5000,
-  });
+  // Pushed by the backend over /api/ws/events instead of polled (#3).
+  const { status, lastError } = useCameraWebSocket();
 
   const autoConnectAttempted = useRef(false);
+
+  // Surface worker-recovery errors (e.g. #9's stall watchdog resetting a
+  // wedged camera) so the user knows to reconnect instead of silence.
+  useEffect(() => {
+    if (!lastError) return;
+    setMessage(lastError);
+    const timer = setTimeout(() => setMessage(null), 6000);
+    return () => clearTimeout(timer);
+  }, [lastError]);
 
   const { lights, connected: esp32Connected } = useLightsWebSocket();
 
@@ -202,9 +207,11 @@ export default function StudioHeader({ stationSubtitle = 'STUDIO WORKBENCH' }: S
             disabled={isPending}
             title={isConnected ? 'Disconnect Camera (Ctrl+C)' : 'Connect Camera (Ctrl+C)'}
             className={`ml-1 px-2 py-0.5 rounded transition flex items-center gap-1 border font-bold text-[11px] ${
+              // Styled by the action the button performs, not the current
+              // state (#2): Disconnect is destructive, Connect is positive.
               isConnected
-                ? 'bg-status-ok/20 text-status-ok border-status-ok/40 hover:bg-status-err/20 hover:text-status-err hover:border-status-err/40'
-                : 'bg-status-err/20 text-status-err border-status-err/40 hover:bg-status-ok/20 hover:text-status-ok hover:border-status-ok/40'
+                ? 'bg-status-err/20 text-status-err border-status-err/40 hover:bg-status-err/30'
+                : 'bg-status-ok/20 text-status-ok border-status-ok/40 hover:bg-status-ok/30'
             }`}
           >
             {connectMutation.isPending || disconnectMutation.isPending ? (
@@ -212,7 +219,7 @@ export default function StudioHeader({ stationSubtitle = 'STUDIO WORKBENCH' }: S
             ) : (
               <Power className="w-3.5 h-3.5" />
             )}
-            <span>{isConnected ? 'Connected' : 'Disconnected'}</span>
+            <span>{isConnected ? 'Disconnect' : 'Connect'}</span>
           </button>
         </div>
 

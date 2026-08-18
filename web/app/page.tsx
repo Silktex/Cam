@@ -6,8 +6,8 @@ import { useRouter } from 'next/navigation';
 import StudioHeader from '@/components/StudioHeader';
 import { WebRTCStreamViewer } from '@/components/WebRTCStreamViewer';
 import { useLightsWebSocket } from '@/hooks/useLightsWebSocket';
+import { useCameraWebSocket } from '@/hooks/useCameraWebSocket';
 import {
-  getCameraStatus,
   getLiveViewUrl,
   setLiveViewSource,
   stopLiveView,
@@ -15,7 +15,7 @@ import {
   captureImages,
   getCameraSettings,
   setCameraSetting,
-  type CameraStatus,
+  type CameraSetting,
 } from '@/lib/api';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -29,6 +29,8 @@ import {
   Camera,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
+  Info,
   Sun,
   Loader2,
 } from 'lucide-react';
@@ -47,9 +49,139 @@ interface FilmstripItem {
   megapixels: string;
 }
 
-const SHUTTER_VALUES = ['1/8000s', '1/4000s', '1/2000s', '1/1000s', '1/500s', '1/250s', '1/125s', '1/60s', '1/30s', '1/15s', '1/8s', '1/4s', '1/2s', '1"'];
-const APERTURE_VALUES = ['f/2.8', 'f/4.0', 'f/5.6', 'f/8.0', 'f/11', 'f/16', 'f/22'];
-const ISO_VALUES = ['ISO 50', 'ISO 100', 'ISO 200', 'ISO 400', 'ISO 800', 'ISO 1600', 'ISO 3200', 'ISO 6400'];
+// gphoto2 config names for the three Exposure Dials backed by real camera
+// choices (#8, #10, #11) instead of the hardcoded value lists this used to be.
+const EXPOSURE_SETTING_NAMES = {
+  shutter: 'shutterspeed',
+  aperture: 'f-number',
+  iso: 'iso',
+  whiteBalance: 'colortemperature',
+} as const;
+
+// #6: each toast type needs its own background/border/icon, not just a 2px
+// dot, so success/error/warn/info are distinguishable without reading text.
+const TOAST_STYLES = {
+  success: { border: 'border-status-ok/50', bg: 'bg-status-ok/10', text: 'text-status-ok', Icon: CheckCircle2 },
+  error: { border: 'border-status-err/50', bg: 'bg-status-err/10', text: 'text-status-err', Icon: AlertCircle },
+  warn: { border: 'border-status-warn/50', bg: 'bg-status-warn/10', text: 'text-status-warn', Icon: AlertTriangle },
+  info: { border: 'border-accent/50', bg: 'bg-accent/10', text: 'text-accent', Icon: Info },
+} as const;
+
+function findSetting(settings: CameraSetting[] | undefined, name: string): CameraSetting | undefined {
+  return settings?.find((s) => s.name === name);
+}
+
+/** gphoto2's get_range() is a (min, max, step) tuple; normalize either that
+ * or the legacy {min,max,step} shape some components assumed into a tuple. */
+function normalizeRange(range: CameraSetting['range']): [number, number, number] | null {
+  if (!range) return null;
+  if (Array.isArray(range)) return range;
+  if (typeof range.min === 'number' && typeof range.max === 'number') {
+    return [range.min, range.max, range.step ?? 1];
+  }
+  return null;
+}
+
+interface ExposureDialProps {
+  label: string;
+  setting: CameraSetting | undefined;
+  disabled: boolean;
+  pending: boolean;
+  onCommit: (value: string) => void;
+  /** Display-only unit dressing (e.g. "8" -> "f/8"); the raw camera-reported
+   * string is still what gets sent back on commit, never the formatted one. */
+  formatValue?: (raw: string) => string;
+}
+
+/**
+ * One Exposure Dial: a fluid-dragging slider whose thumb position is decoupled
+ * from the camera's discrete supported values while dragging, and only snaps
+ * to (and commits) the nearest real camera choice on release (#10, #11).
+ * Range-type settings (e.g. color temperature) already vary continuously, so
+ * they skip the choice-snapping and commit on every change.
+ */
+function ExposureDial({ label, setting, disabled, pending, onCommit, formatValue = (v) => v }: ExposureDialProps) {
+  const choices = setting?.choices;
+  const range = normalizeRange(setting?.range);
+  const confirmedValue = setting?.value != null ? String(setting.value) : null;
+
+  const confirmedPercent = (() => {
+    if (choices && choices.length > 1) {
+      const idx = Math.max(0, choices.indexOf(confirmedValue ?? ''));
+      return (idx / (choices.length - 1)) * 100;
+    }
+    if (range) {
+      const [min, max] = range;
+      if (max > min && confirmedValue != null) {
+        return ((Number(confirmedValue) - min) / (max - min)) * 100;
+      }
+    }
+    return 0;
+  })();
+
+  const [dragging, setDragging] = useState(false);
+  const [visualPercent, setVisualPercent] = useState(confirmedPercent);
+
+  useEffect(() => {
+    if (!dragging) setVisualPercent(confirmedPercent);
+  }, [confirmedPercent, dragging]);
+
+  const previewRaw = (() => {
+    if (choices && choices.length > 1) {
+      const idx = Math.round((visualPercent / 100) * (choices.length - 1));
+      return choices[idx] ?? confirmedValue;
+    }
+    if (range) {
+      const [min, max, step] = range;
+      const raw = min + (visualPercent / 100) * (max - min);
+      return String(Math.round(raw / step) * step);
+    }
+    return confirmedValue;
+  })();
+
+  const isUnavailable = !setting || (!choices?.length && !range);
+
+  return (
+    <div className="p-3 rounded-lg bg-surface-raised border border-border-subtle space-y-1.5">
+      <div className="flex items-center justify-between text-xs">
+        <span className="text-gray-400 font-mono">{label}</span>
+        <span className="text-accent font-mono font-bold text-sm">
+          {isUnavailable || previewRaw == null ? '—' : formatValue(previewRaw)}
+        </span>
+      </div>
+      <input
+        type="range"
+        min="0"
+        max="100"
+        step="any"
+        disabled={disabled || isUnavailable || pending}
+        value={visualPercent}
+        onMouseDown={() => setDragging(true)}
+        onTouchStart={() => setDragging(true)}
+        onInput={(e) => setVisualPercent(parseFloat(e.currentTarget.value))}
+        onChange={(e) => {
+          setDragging(false);
+          const pct = parseFloat(e.currentTarget.value);
+          if (choices && choices.length > 1) {
+            const idx = Math.round((pct / 100) * (choices.length - 1));
+            const value = choices[idx];
+            if (value !== undefined && value !== confirmedValue) onCommit(value);
+          } else if (range) {
+            const [min, max, step] = range;
+            const raw = min + (pct / 100) * (max - min);
+            const snapped = Math.round(raw / step) * step;
+            if (String(snapped) !== confirmedValue) onCommit(String(snapped));
+          }
+        }}
+        className="w-full accent-accent h-1.5 rounded-lg appearance-none cursor-pointer disabled:cursor-not-allowed"
+      />
+      <div className="flex justify-between text-[10px] font-mono text-gray-500">
+        <span>{isUnavailable ? '—' : formatValue(String(choices?.[0] ?? range?.[0]))}</span>
+        <span>{isUnavailable ? '—' : formatValue(String(choices?.[choices.length - 1] ?? range?.[1]))}</span>
+      </div>
+    </div>
+  );
+}
 
 const LIGHT_CHANNELS = [
   { id: 0, name: 'TOP DOME', position: 'Center Dome', shortcut: 'T' },
@@ -77,13 +209,15 @@ export default function UnifiedCaptureStudioPage() {
     }, 3500);
   }, []);
 
-  // Camera & Stream State
-  const { data: cameraStatus } = useQuery({
-    queryKey: ['camera', 'status'],
-    queryFn: () => getCameraStatus().then((res) => res.data as CameraStatus),
-    refetchInterval: 5000,
-  });
+  // Camera & Stream State - pushed over /api/ws/events instead of polled (#3)
+  const { status: cameraStatus, lastError: cameraError } = useCameraWebSocket();
   const isCameraConnected = cameraStatus?.connected ?? false;
+
+  // Surface worker-recovery errors (e.g. #9's stall watchdog resetting a
+  // wedged camera) so the user knows to reconnect instead of silence.
+  useEffect(() => {
+    if (cameraError) addToast(cameraError, 'error');
+  }, [cameraError, addToast]);
 
   const [streamSrc, setStreamSrc] = useState<string | null>(null);
   const [streamKey, setStreamKey] = useState(0);
@@ -102,11 +236,35 @@ export default function UnifiedCaptureStudioPage() {
   const [shutterFlashing, setShutterFlashing] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
 
-  // Exposure Parameters
-  const [shutterIndex, setShutterIndex] = useState(6); // 1/125s
-  const [apertureIndex, setApertureIndex] = useState(3); // f/8.0
-  const [isoIndex, setIsoIndex] = useState(1); // ISO 100
-  const [colorTemp, setColorTemp] = useState(5600); // 5600K
+  // Exposure Dials - real camera-reported settings, not local guesses (#8).
+  // Refetches on connect/reconnect via the `enabled` flip below; the 20s
+  // fallback interval only covers a camera-side change made outside the UI.
+  const { data: exposureSettings } = useQuery({
+    queryKey: ['camera', 'settings'],
+    queryFn: () => getCameraSettings().then((res) => res.data as CameraSetting[]),
+    enabled: isCameraConnected,
+    refetchInterval: 20000,
+  });
+
+  const setSettingMutation = useMutation({
+    mutationFn: ({ name, value }: { name: string; value: string; label: string }) => setCameraSetting(name, value),
+    onSuccess: (_res, { label, value }) => {
+      queryClient.invalidateQueries({ queryKey: ['camera', 'settings'] });
+      addToast(`${label} updated: ${value}`, 'success');
+    },
+    onError: (err: any, { label }) => {
+      queryClient.invalidateQueries({ queryKey: ['camera', 'settings'] });
+      addToast(`Failed to update ${label}: ${err?.response?.data?.detail ?? 'camera rejected the change'}`, 'error');
+    },
+  });
+
+  const commitSetting = useCallback(
+    (name: string, value: string) => {
+      const label = findSetting(exposureSettings, name)?.label ?? name;
+      setSettingMutation.mutate({ name, value, label });
+    },
+    [setSettingMutation, exposureSettings]
+  );
 
   // Filmstrip
   const [filmstrip, setFilmstrip] = useState<FilmstripItem[]>([
@@ -146,33 +304,6 @@ export default function UnifiedCaptureStudioPage() {
       startStream();
     }
   }, [isCameraConnected, streamSrc, isFrozen, startStream]);
-
-  // Exposure setting handlers
-  const handleShutterChange = (idx: number) => {
-    setShutterIndex(idx);
-    const val = SHUTTER_VALUES[idx];
-    setCameraSetting('shutterspeed', val).catch(() => {});
-    addToast(`Shutter Speed updated: ${val}`);
-  };
-
-  const handleApertureChange = (idx: number) => {
-    setApertureIndex(idx);
-    const val = APERTURE_VALUES[idx];
-    setCameraSetting('f-number', val.replace('f/', '')).catch(() => {});
-    addToast(`Aperture updated: ${val}`);
-  };
-
-  const handleIsoChange = (idx: number) => {
-    setIsoIndex(idx);
-    const val = ISO_VALUES[idx];
-    setCameraSetting('iso', val.replace('ISO ', '')).catch(() => {});
-    addToast(`ISO Sensitivity updated: ${val}`);
-  };
-
-  const handleWbChange = (val: number) => {
-    setColorTemp(val);
-    setCameraSetting('colortemperature', val.toString()).catch(() => {});
-  };
 
   // Autofocus trigger
   const handleAutofocus = async () => {
@@ -312,29 +443,26 @@ export default function UnifiedCaptureStudioPage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [lights, masterLux, setAllLights, handleCaptureRaw, toggleFreeze, handleToggleStreamSource]);
 
+  // #12: h-screen (not min-h-screen) + overflow-hidden caps the page at the
+  // viewport so <main>'s flex-1 actually constrains its height instead of
+  // growing past 100vh - Auto Focus/Freeze Frame in the fixed action bar
+  // stay on-screen; only the settings column scrolls internally.
   return (
-    <div className="min-h-screen bg-chassis text-gray-100 font-sans flex flex-col antialiased selection:bg-accent selection:text-white">
+    <div className="h-screen overflow-hidden bg-chassis text-gray-100 font-sans flex flex-col antialiased selection:bg-accent selection:text-white">
       {/* Toast Container */}
       <div className="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none">
-        {toasts.map((t) => (
-          <div
-            key={t.id}
-            className="px-4 py-2.5 rounded-lg bg-surface-raised border border-border-strong text-xs font-mono text-white shadow-2xl flex items-center gap-2 transform transition-all duration-300 pointer-events-auto"
-          >
-            <span
-              className={`w-2 h-2 rounded-full ${
-                t.type === 'success'
-                  ? 'bg-status-ok'
-                  : t.type === 'warn'
-                  ? 'bg-status-warn'
-                  : t.type === 'error'
-                  ? 'bg-status-err'
-                  : 'bg-accent'
-              }`}
-            />
-            <span>{t.message}</span>
-          </div>
-        ))}
+        {toasts.map((t) => {
+          const style = TOAST_STYLES[t.type];
+          return (
+            <div
+              key={t.id}
+              className={`px-4 py-2.5 rounded-lg border backdrop-blur-md ${style.border} ${style.bg} text-xs font-mono text-white shadow-2xl flex items-center gap-2 transform transition-all duration-300 pointer-events-auto`}
+            >
+              <style.Icon className={`w-4 h-4 shrink-0 ${style.text}`} />
+              <span>{t.message}</span>
+            </div>
+          );
+        })}
       </div>
 
       {/* Global Top Header */}
@@ -515,103 +643,45 @@ export default function UnifiedCaptureStudioPage() {
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                {/* Shutter Speed */}
-                <div className="p-3 rounded-lg bg-surface-raised border border-border-subtle space-y-1.5">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-gray-400 font-mono">SHUTTER</span>
-                    <span className="text-accent font-mono font-bold text-sm">
-                      {SHUTTER_VALUES[shutterIndex]}
-                    </span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max={SHUTTER_VALUES.length - 1}
-                    value={shutterIndex}
-                    onChange={(e) => handleShutterChange(parseInt(e.target.value, 10))}
-                    className="w-full accent-accent h-1.5 bg-chassis rounded-lg appearance-none cursor-pointer"
-                  />
-                  <div className="flex justify-between text-[10px] font-mono text-gray-500">
-                    <span>1/8000</span>
-                    <span>1/250</span>
-                    <span>1/60</span>
-                    <span>1"</span>
-                  </div>
-                </div>
-
-                {/* Aperture */}
-                <div className="p-3 rounded-lg bg-surface-raised border border-border-subtle space-y-1.5">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-gray-400 font-mono">APERTURE</span>
-                    <span className="text-accent font-mono font-bold text-sm">
-                      {APERTURE_VALUES[apertureIndex]}
-                    </span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max={APERTURE_VALUES.length - 1}
-                    value={apertureIndex}
-                    onChange={(e) => handleApertureChange(parseInt(e.target.value, 10))}
-                    className="w-full accent-accent h-1.5 bg-chassis rounded-lg appearance-none cursor-pointer"
-                  />
-                  <div className="flex justify-between text-[10px] font-mono text-gray-500">
-                    <span>f/2.8</span>
-                    <span>f/5.6</span>
-                    <span>f/8.0</span>
-                    <span>f/22</span>
-                  </div>
-                </div>
-
-                {/* ISO Sensitivity */}
-                <div className="p-3 rounded-lg bg-surface-raised border border-border-subtle space-y-1.5">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-gray-400 font-mono">ISO SENSITIVITY</span>
-                    <span className="text-accent font-mono font-bold text-sm">
-                      {ISO_VALUES[isoIndex]}
-                    </span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max={ISO_VALUES.length - 1}
-                    value={isoIndex}
-                    onChange={(e) => handleIsoChange(parseInt(e.target.value, 10))}
-                    className="w-full accent-accent h-1.5 bg-chassis rounded-lg appearance-none cursor-pointer"
-                  />
-                  <div className="flex justify-between text-[10px] font-mono text-gray-500">
-                    <span>50</span>
-                    <span>100</span>
-                    <span>400</span>
-                    <span>6400</span>
-                  </div>
-                </div>
-
-                {/* White Balance */}
-                <div className="p-3 rounded-lg bg-surface-raised border border-border-subtle space-y-1.5">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-gray-400 font-mono">WHITE BALANCE</span>
-                    <span className="text-accent font-mono font-bold text-sm">
-                      {colorTemp}K
-                    </span>
-                  </div>
-                  <input
-                    type="range"
-                    min="2800"
-                    max="7500"
-                    step="100"
-                    value={colorTemp}
-                    onChange={(e) => handleWbChange(parseInt(e.target.value, 10))}
-                    className="w-full accent-accent h-1.5 bg-chassis rounded-lg appearance-none cursor-pointer"
-                  />
-                  <div className="flex justify-between text-[10px] font-mono text-gray-500">
-                    <span>3200K</span>
-                    <span>4500K</span>
-                    <span>5600K</span>
-                    <span>6500K</span>
-                  </div>
-                </div>
+                <ExposureDial
+                  label="SHUTTER"
+                  setting={findSetting(exposureSettings, EXPOSURE_SETTING_NAMES.shutter)}
+                  disabled={!isCameraConnected}
+                  pending={setSettingMutation.isPending}
+                  onCommit={(value) => commitSetting(EXPOSURE_SETTING_NAMES.shutter, value)}
+                  formatValue={(v) => (v.toLowerCase() === 'bulb' ? 'Bulb' : `${v}s`)}
+                />
+                <ExposureDial
+                  label="APERTURE"
+                  setting={findSetting(exposureSettings, EXPOSURE_SETTING_NAMES.aperture)}
+                  disabled={!isCameraConnected}
+                  pending={setSettingMutation.isPending}
+                  onCommit={(value) => commitSetting(EXPOSURE_SETTING_NAMES.aperture, value)}
+                  formatValue={(v) => `f/${v}`}
+                />
+                <ExposureDial
+                  label="ISO SENSITIVITY"
+                  setting={findSetting(exposureSettings, EXPOSURE_SETTING_NAMES.iso)}
+                  disabled={!isCameraConnected}
+                  pending={setSettingMutation.isPending}
+                  onCommit={(value) => commitSetting(EXPOSURE_SETTING_NAMES.iso, value)}
+                  formatValue={(v) => `ISO ${v}`}
+                />
+                <ExposureDial
+                  label="WHITE BALANCE"
+                  setting={findSetting(exposureSettings, EXPOSURE_SETTING_NAMES.whiteBalance)}
+                  disabled={!isCameraConnected}
+                  pending={setSettingMutation.isPending}
+                  onCommit={(value) => commitSetting(EXPOSURE_SETTING_NAMES.whiteBalance, value)}
+                  formatValue={(v) => `${v}K`}
+                />
               </div>
+              {isCameraConnected && !exposureSettings && (
+                <p className="text-[11px] font-mono text-gray-500">Loading camera settings…</p>
+              )}
+              {!isCameraConnected && (
+                <p className="text-[11px] font-mono text-gray-500">Connect camera to view and adjust exposure settings.</p>
+              )}
             </div>
 
             {/* INTEGRATED 9-PANEL LIGHTING RIG CONTROLLER */}

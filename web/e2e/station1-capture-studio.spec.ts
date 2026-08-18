@@ -41,11 +41,31 @@ test.describe('Station 1: Unified Capture Studio', () => {
       });
     });
 
-    await page.route('**/api/camera/setting*', async (route) => {
+    // Real gphoto2-shaped Exposure Dial settings, stateful across GET/POST so
+    // a slider commit is reflected back on the next read - the confirmed
+    // camera value, not the value the user requested (#5, #8).
+    const cameraSettings: Record<string, { name: string; label: string; type: string; readonly: boolean; value: string; choices?: string[]; range?: [number, number, number] }> = {
+      shutterspeed: { name: 'shutterspeed', label: 'Shutter Speed', type: 'radio', readonly: false, value: '1/125', choices: ['1/8000', '1/4000', '1/2000', '1/1000', '1/500', '1/250', '1/125', '1/60', '1/30', '1/15', '1/8', '1/4', '1/2', '1'] },
+      'f-number': { name: 'f-number', label: 'Aperture', type: 'radio', readonly: false, value: '8', choices: ['2.8', '4', '5.6', '8', '11', '16', '22'] },
+      iso: { name: 'iso', label: 'ISO', type: 'radio', readonly: false, value: '100', choices: ['50', '100', '200', '400', '800', '1600', '3200', '6400'] },
+      colortemperature: { name: 'colortemperature', label: 'Color Temperature', type: 'range', readonly: false, value: '5600', range: [2800, 7500, 100] },
+    };
+
+    await page.route('**/api/camera/settings', async (route) => {
+      if (route.request().method() === 'POST') {
+        const { name, value } = route.request().postDataJSON();
+        if (cameraSettings[name]) cameraSettings[name].value = String(value);
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ success: true, name, value }),
+        });
+        return;
+      }
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ success: true }),
+        body: JSON.stringify(Object.values(cameraSettings)),
       });
     });
 
@@ -162,34 +182,43 @@ test.describe('Station 1: Unified Capture Studio', () => {
     await expect(page.getByText(/Captured RAW:/i)).toBeVisible();
   });
 
-  test('CAP-06: adjusts PTP exposure parameters (Shutter, Aperture, ISO, White Balance)', async ({ page }) => {
-    // Initial exposure dials
+  test('CAP-06: adjusts PTP exposure parameters using real camera-reported values (#8, #10, #11)', async ({ page }) => {
+    // Initial exposure dials reflect the mocked /api/camera/settings response,
+    // not a hardcoded guess.
     await expect(page.getByText('1/125s')).toBeVisible();
-    await expect(page.getByText('f/8.0').first()).toBeVisible();
+    await expect(page.getByText('f/8').first()).toBeVisible();
     await expect(page.getByText('ISO 100')).toBeVisible();
     await expect(page.getByText('5600K').first()).toBeVisible();
 
-    // Shutter speed slider interaction
+    // Dials are index-into-real-choices sliders (0-100 visual position mapped
+    // to the nearest camera-supported value), not the old fixed value lists.
+    // These are React-controlled range inputs with step="any", so drive them
+    // via direct value assignment + native events rather than locator.fill()
+    // (which rejects the non-integer percentages a fluid drag lands on).
     const sliders = page.locator('input[type="range"]');
-    // First slider: Shutter
-    await sliders.nth(0).fill('4'); // index 4 = 1/500s
-    await sliders.nth(0).dispatchEvent('change');
+    const pctForChoice = (idx: number, len: number) => (idx / (len - 1)) * 100;
+    const setSlider = (index: number, percent: number) =>
+      sliders.nth(index).evaluate((el: HTMLInputElement, value: number) => {
+        el.value = String(value);
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      }, percent);
+
+    // Shutter: choices has 14 entries, move to index 4 ("1/500").
+    await setSlider(0, pctForChoice(4, 14));
     await expect(page.getByText('1/500s').first()).toBeVisible();
+    await expect(page.getByText(/Shutter Speed updated: 1\/500/i)).toBeVisible();
 
-    // Second slider: Aperture
-    await sliders.nth(1).fill('1'); // index 1 = f/4.0
-    await sliders.nth(1).dispatchEvent('change');
-    await expect(page.getByText('f/4.0').first()).toBeVisible();
+    // Aperture: choices has 7 entries, move to index 1 ("4").
+    await setSlider(1, pctForChoice(1, 7));
+    await expect(page.getByText('f/4').first()).toBeVisible();
 
-    // Third slider: ISO
-    await sliders.nth(2).fill('3'); // index 3 = ISO 400
-    await sliders.nth(2).dispatchEvent('change');
+    // ISO: choices has 8 entries, move to index 3 ("400").
+    await setSlider(2, pctForChoice(3, 8));
     await expect(page.getByText('ISO 400').first()).toBeVisible();
 
-    // Fourth slider: White Balance
-    await expect(page.getByText('5600K').first()).toBeVisible();
-    await sliders.nth(3).fill('4500');
-    await sliders.nth(3).dispatchEvent('change');
+    // White Balance: continuous range 2800-7500 step 100, move to 4500.
+    await setSlider(3, ((4500 - 2800) / (7500 - 2800)) * 100);
     await expect(page.getByText('4500K').first()).toBeVisible();
   });
 
@@ -203,8 +232,9 @@ test.describe('Station 1: Unified Capture Studio', () => {
     await topDome.click();
     await expect(page.getByText(/TOP DOME:/i).first()).toBeVisible();
 
-    // Side spot buttons 1-8
-    const spot1 = page.getByTitle(/Side 1/i);
+    // Side spot buttons 1-8 (radial visualizer dot; the toggle-card grid
+    // below also has a title containing "Side 1", so scope to the exact one)
+    const spot1 = page.getByTitle('Side 1 (N)');
     await expect(spot1).toBeVisible();
     await spot1.click();
     await expect(page.getByText(/SIDE SPOT #1:/i).first()).toBeVisible();

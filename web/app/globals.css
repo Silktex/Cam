@@ -48,10 +48,40 @@ input[type="range"] {
   background: transparent;
 }
 
-input[type="range"]::-webkit-slider-track {
+/* #4: this was ::-webkit-slider-track, which isn't a real pseudo-element
+   (the correct name is -runnable-track) - the browser silently dropped the
+   whole rule, leaving no visible track, just the thumb. */
+input[type="range"]::-webkit-slider-runnable-track {
   background: rgba(255, 255, 255, 0.1);
   border-radius: 9999px;
   height: 6px;
+}
+
+input[type="range"]::-moz-range-track {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 9999px;
+  height: 6px;
+}
+
+input[type="range"]:disabled::-webkit-slider-runnable-track,
+input[type="range"]:disabled::-moz-range-track {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+input[type="range"]:disabled::-webkit-slider-thumb,
+input[type="range"]:disabled::-moz-range-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  cursor: not-allowed;
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  background: #E58E26;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(229, 142, 38, 0.4);
 }
 
 input[type="range"]::-webkit-slider-thumb {
