@@ -107,20 +107,20 @@ export default function LightControlPanel({
           <div
             key={light.id}
             onClick={() => setLight(light.id, !light.on)}
-            className={`flex items-center justify-between px-3 py-2 rounded-xl border transition-all cursor-pointer select-none ${
+            className={`flex items-center justify-between px-3 py-2 rounded-xl border bg-slate-800/40 transition-all cursor-pointer select-none ${
               light.on
-                ? 'bg-teal-950/40 border-teal-500/40 shadow-sm shadow-teal-500/10'
-                : 'bg-slate-800/40 border-slate-700/60 hover:bg-slate-800/80 hover:border-slate-600'
+                ? 'border-green-500/50 shadow-sm shadow-green-500/10'
+                : 'border-red-500/30 hover:border-red-500/50'
             }`}
           >
             <div className="flex items-center gap-2.5">
               <span
                 className={`w-2.5 h-2.5 rounded-full transition-all ${
-                  light.on ? 'bg-teal-400 shadow-sm shadow-teal-400 animate-pulse' : 'bg-slate-600'
+                  light.on ? 'bg-green-400 shadow-sm shadow-green-400 animate-pulse' : 'bg-red-500'
                 }`}
               />
               <div>
-                <span className={`text-sm font-medium transition-colors ${light.on ? 'text-white' : 'text-slate-300'}`}>
+                <span className={`text-sm font-medium transition-colors ${light.on ? 'text-green-400' : 'text-red-400'}`}>
                   {light.name}
                 </span>
                 <span className="text-[10px] text-slate-500 block">
@@ -132,10 +132,10 @@ export default function LightControlPanel({
             {/* Direct Toggle Button */}
             <div className="flex items-center gap-2">
               <span
-                className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded transition-colors ${
+                className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded border transition-colors ${
                   light.on
-                    ? 'bg-teal-500 text-slate-950 font-extrabold'
-                    : 'bg-slate-700/80 text-slate-400'
+                    ? 'bg-green-500/20 text-green-400 border-green-500/50 font-extrabold'
+                    : 'bg-red-500/20 text-red-400 border-red-500/50'
                 }`}
               >
                 {light.on ? 'ON' : 'OFF'}
@@ -149,7 +149,7 @@ export default function LightControlPanel({
                   setLight(light.id, !light.on);
                 }}
                 className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                  light.on ? 'bg-teal-500' : 'bg-slate-700'
+                  light.on ? 'bg-green-500' : 'bg-red-900/70'
                 }`}
               >
                 <span

@@ -56,6 +56,17 @@ _COMMAND_TIMEOUT_SECONDS = 30.0
 _CONNECT_TIMEOUT_SECONDS = 120.0
 _SHUTDOWN_TIMEOUT_SECONDS = 3.0
 
+# A blocking libgphoto2/PTP call inside the worker thread can't be
+# interrupted from Python (it's native code) - if one truly wedges (e.g. a
+# set_config during live view that the camera never acknowledges), the
+# worker stops draining its queue forever and every future command hangs
+# with it. The watchdog below detects that stall and abandons the thread so
+# a fresh connect() can recover without restarting the app or power-cycling
+# the camera. The margin over _COMMAND_TIMEOUT_SECONDS avoids flagging a
+# command that is merely running right up against its own timeout.
+_WATCHDOG_INTERVAL_SECONDS = 5.0
+_WORKER_STALL_SECONDS = _COMMAND_TIMEOUT_SECONDS + 15.0
+
 # Subprocess bounds (seconds) for the CLI probes below.
 # gphoto2 CLI operations (--auto-detect USB enumeration, --reset PTP port
 # reset) normally finish in ~1-3s, but a wedged USB bus can hang them
@@ -115,6 +126,10 @@ class CameraService:
 
         self._preview_fps = max(1, int(settings.PREVIEW_FPS))
 
+        # Watchdog: detects a worker thread wedged in a blocking native call.
+        self._worker_heartbeat = time.monotonic()
+        self._watchdog_started = False
+
         self._initialized = True
 
         # Register cleanup on exit
@@ -133,6 +148,7 @@ class CameraService:
                 raise RuntimeError("Camera worker is shutting down")
             if self._worker is None or not self._worker.is_alive():
                 self._stop_worker.clear()
+                self._worker_heartbeat = time.monotonic()
                 self._worker = threading.Thread(
                     target=self._worker_loop,
                     name="camera-worker",
@@ -140,6 +156,63 @@ class CameraService:
                 )
                 self._worker.start()
                 logger.info("Camera worker thread started")
+        self._ensure_watchdog()
+
+    def _ensure_watchdog(self):
+        """Start the stall-watchdog thread once (survives worker restarts)."""
+        if self._watchdog_started:
+            return
+        self._watchdog_started = True
+        threading.Thread(
+            target=self._watchdog_loop,
+            name="camera-watchdog",
+            daemon=True,
+        ).start()
+
+    def _watchdog_loop(self):
+        while True:
+            time.sleep(_WATCHDOG_INTERVAL_SECONDS)
+            worker = self._worker
+            if worker is None or not worker.is_alive():
+                continue
+            if time.monotonic() - self._worker_heartbeat > _WORKER_STALL_SECONDS:
+                self._recover_stalled_worker()
+
+    def _recover_stalled_worker(self):
+        """Abandon a worker thread wedged in a blocking native call.
+
+        The stuck thread can't be killed (it's blocked in libgphoto2 C code),
+        so it's simply left to leak as a daemon thread while a clean slate is
+        established: fail every queued command, drop the camera handle, and
+        clear connection state so the next connect() spins up a fresh worker.
+
+        # ponytail: leaks one daemon thread per stall instead of a process-level
+        # supervisor that could actually kill the wedged call; fine for the rare
+        # "camera truly hung" case this guards. If stalls become frequent enough
+        # to leak meaningfully, move camera I/O to a subprocess that can be killed.
+        """
+        logger.error(
+            f"Camera worker unresponsive for >{_WORKER_STALL_SECONDS}s "
+            "(wedged PTP call) - abandoning it and resetting connection state"
+        )
+        with self._worker_start_lock:
+            self._worker = None
+            self._accepting_commands = True
+            self._fail_queued_commands("Camera worker was wedged and had to be restarted")
+        with self._lock:
+            self._camera = None
+            self._context = None
+            self._connected = False
+            self._model = None
+        with self._frame_cond:
+            self._live_view_active = False
+            self._frame_cond.notify_all()
+        self._stop_live_view.set()
+        self.kill_ptp_processes()
+        event_bus.publish(
+            EventType.ERROR,
+            {"message": "Camera became unresponsive and was reset. Reconnect to continue."},
+        )
 
     def _submit(self, tag: str, *args, **kwargs) -> Future:
         """Queue a command for the worker and return its result Future."""
@@ -153,6 +226,7 @@ class CameraService:
     def _worker_loop(self):
         """Single owner of the camera: interleaves commands and live view."""
         while not self._stop_worker.is_set():
+            self._worker_heartbeat = time.monotonic()
             # Poll the command queue.  While live view is active we use a short
             # timeout so frames are produced at ~FPS; otherwise we idle cheaply.
             timeout = (1.0 / self._preview_fps) if self.live_view_active else 0.5
@@ -225,14 +299,14 @@ class CameraService:
     def _result(self, future: Future, timeout: float | None = None):
         return future.result(timeout=timeout or _COMMAND_TIMEOUT_SECONDS)
 
-    def _fail_queued_commands(self) -> None:
+    def _fail_queued_commands(self, message: str = "Camera worker is shutting down") -> None:
         while True:
             try:
                 _tag, _args, _kwargs, future = self._cmd_queue.get_nowait()
             except Empty:
                 return
             if not future.done():
-                future.set_exception(RuntimeError("Camera worker is shutting down"))
+                future.set_exception(RuntimeError(message))
 
     def _shutdown_worker(self) -> bool:
         cleanup_without_worker = False

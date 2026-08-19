@@ -461,6 +461,11 @@ function SettingControl({
 
   // Range - slider
   if (setting.type === 'range' && setting.range) {
+    // gphoto2's get_range() is a (min, max, step) tuple; normalize either
+    // that or the legacy {min,max,step} shape.
+    const [rangeMin, rangeMax, rangeStep] = Array.isArray(setting.range)
+      ? setting.range
+      : [setting.range.min, setting.range.max, setting.range.step];
     return (
       <div className="py-3">
         <div className="flex items-center justify-between mb-1.5">
@@ -485,9 +490,9 @@ function SettingControl({
         </div>
         <input
           type="range"
-          min={setting.range.min}
-          max={setting.range.max}
-          step={setting.range.step}
+          min={rangeMin}
+          max={rangeMax}
+          step={rangeStep}
           value={value}
           onChange={(e) => onChange(parseFloat(e.target.value))}
           className="w-full"

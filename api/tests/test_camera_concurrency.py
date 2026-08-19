@@ -194,6 +194,69 @@ def test_capture_submission_and_cancel_do_not_lose_cancel_request(
     assert camera_service._operation_cancel.is_set()
 
 
+def test_recover_stalled_worker_resets_state_and_fails_queued_commands(
+    camera_service: CameraService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(camera_service, "kill_ptp_processes", lambda: [])
+    camera_service._set_camera_state(RecordingCamera(), object(), True, "fake")
+    camera_service._worker = StuckWorker()
+    with camera_service._frame_cond:
+        camera_service._live_view_active = True
+    queued: Future = Future()
+    camera_service._cmd_queue.put(("set_setting", (), {}, queued))
+
+    camera_service._recover_stalled_worker()
+
+    assert camera_service._worker is None
+    assert camera_service.is_connected is False
+    assert camera_service.live_view_active is False
+    assert camera_service._accepting_commands is True
+    with pytest.raises(RuntimeError):
+        queued.result(timeout=0)
+    # A fresh connect() must be able to spin up a new worker afterwards.
+    camera_service._ensure_worker()
+    assert isinstance(camera_service._worker, threading.Thread)
+
+
+def test_watchdog_recovers_worker_wedged_in_native_call(
+    camera_service: CameraService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(camera_module, "_WATCHDOG_INTERVAL_SECONDS", 0.01, raising=False)
+    monkeypatch.setattr(camera_module, "_WORKER_STALL_SECONDS", 0.05, raising=False)
+    monkeypatch.setattr(camera_service, "kill_ptp_processes", lambda: [])
+    never_returns = threading.Event()
+
+    def wedged_execute(_tag: str, *_args, **_kwargs):
+        never_returns.wait()  # simulates a blocking libgphoto2 call that never returns
+        return {"success": True}
+
+    monkeypatch.setattr(camera_service, "_execute", wedged_execute)
+    camera_service._ensure_worker()
+    # First command is dequeued and hangs inside _execute; second sits queued
+    # behind it and is what recovery can actually fail (the in-flight one's
+    # future is abandoned along with the wedged thread, not resolved).
+    stuck_future = camera_service._submit("wedge")
+    queued_future = camera_service._submit("queued-behind-wedge")
+
+    recovered = threading.Event()
+    orig = camera_service._recover_stalled_worker
+
+    def recover_and_signal():
+        orig()
+        recovered.set()
+
+    monkeypatch.setattr(camera_service, "_recover_stalled_worker", recover_and_signal)
+
+    assert recovered.wait(timeout=2.0), "watchdog did not recover a wedged worker in time"
+    assert camera_service._worker is None
+    assert not stuck_future.done()  # abandoned with the thread, never resolved
+    with pytest.raises(RuntimeError, match="wedged"):
+        queued_future.result(timeout=0)
+    never_returns.set()  # release the abandoned thread so the test process can exit cleanly
+
+
 def test_troubleshoot_reconnects_without_destructive_usb_reset(
     camera_service: CameraService,
     monkeypatch: pytest.MonkeyPatch,

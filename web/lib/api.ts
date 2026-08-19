@@ -22,6 +22,14 @@ export const api = axios.create({
   },
 });
 
+// Camera-control calls are meant to be quick (backend bounds them to 30s,
+// 120s for connect's retry loop) - give the client a matching ceiling so a
+// stalled connection always settles a pending mutation/spinner instead of
+// hanging forever (#1), without capping genuinely long processing endpoints
+// (PBR generation, calibration, batch capture, etc.) that share this client.
+const CAMERA_COMMAND_TIMEOUT_MS = 35000;
+const CAMERA_CONNECT_TIMEOUT_MS = 130000;
+
 api.interceptors.request.use((config) => {
   const dynamicBase = getApiBaseUrl();
   if (dynamicBase && !config.url?.startsWith('http://') && !config.url?.startsWith('https://')) {
@@ -47,14 +55,14 @@ api.interceptors.response.use(
 export const getHealth = () => api.get('/health');
 
 // Camera
-export const getCameraStatus = () => api.get('/api/camera/status');
-export const connectCamera = () => api.post('/api/camera/connect');
-export const disconnectCamera = () => api.post('/api/camera/disconnect');
-export const troubleshootCamera = () => api.post('/api/camera/troubleshoot');
-export const getCameraSettings = () => api.get('/api/camera/settings');
+export const getCameraStatus = () => api.get('/api/camera/status', { timeout: CAMERA_COMMAND_TIMEOUT_MS });
+export const connectCamera = () => api.post('/api/camera/connect', undefined, { timeout: CAMERA_CONNECT_TIMEOUT_MS });
+export const disconnectCamera = () => api.post('/api/camera/disconnect', undefined, { timeout: CAMERA_COMMAND_TIMEOUT_MS });
+export const troubleshootCamera = () => api.post('/api/camera/troubleshoot', undefined, { timeout: CAMERA_CONNECT_TIMEOUT_MS });
+export const getCameraSettings = () => api.get('/api/camera/settings', { timeout: CAMERA_COMMAND_TIMEOUT_MS });
 export const setCameraSetting = (name: string, value: any) =>
-  api.post('/api/camera/settings', { name, value });
-export const triggerAutofocus = () => api.post('/api/camera/autofocus');
+  api.post('/api/camera/settings', { name, value }, { timeout: CAMERA_COMMAND_TIMEOUT_MS });
+export const triggerAutofocus = () => api.post('/api/camera/autofocus', undefined, { timeout: CAMERA_COMMAND_TIMEOUT_MS });
 
 // Capture
 export const captureImages = (request: CaptureRequest) =>
@@ -190,7 +198,12 @@ export interface CameraSetting {
   type: string;
   readonly: boolean;
   choices?: string[];
-  range?: { min: number; max: number; step: number };
+  // gphoto2's get_range() returns a plain (min, max, step) tuple, which
+  // FastAPI serializes as a JSON array, not this {min,max,step} shape - kept
+  // loose so both the array the backend actually sends and this shape
+  // type-check; parse defensively (see normalizeRange in page.tsx) rather
+  // than trusting either at runtime.
+  range?: { min: number; max: number; step: number } | [number, number, number];
 }
 
 export interface CaptureRequest {
